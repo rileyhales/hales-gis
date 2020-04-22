@@ -8,5 +8,4 @@ API Documentation
    convert
    data
    geotiffs
-   gribs
-   netcdfs
+   timedata

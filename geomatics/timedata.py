@@ -1,14 +1,18 @@
+import os
+
+import netCDF4 as nc
 import numpy as np
 import pandas as pd
 import rasterio
 import rasterstats
 import xarray as xr
 
-from .conversions import detect_type
+from .convert import detect_type
 
-__all__ = ['point_series', 'box_series', 'shp_series']
+__all__ = ['point_series', 'box_series', 'shp_series', 'generate_timejoining_ncml']
 
 
+# TIMESERIES FUNCTIONS
 def point_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd.DataFrame:
     """
     Creates a timeseries of values at the grid cell closest to a specified point.
@@ -32,7 +36,7 @@ def point_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd
     Examples:
         .. code-block:: python
 
-            data = geomatics.timeseries.point_series('/path/to/data/', 'AirTemp', (10, 20))
+            data = geomatics.timedata.point_series('/path/to/data/', 'AirTemp', (10, 20))
     """
     # for customizing the workflow for standards non-compliant netcdf files
     x_var = kwargs.get('xvar', 'lon')
@@ -111,7 +115,7 @@ def box_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd.D
     Examples:
         .. code-block:: python
 
-            data = geomatics.timeseries.box_series('/path/to/netcdf/', 'AirTemp', (10, 20, 15, 25))
+            data = geomatics.timedata.box_series('/path/to/netcdf/', 'AirTemp', (10, 20, 15, 25))
     """
     # for customizing the workflow for standards non-compliant netcdf files
     x_var = kwargs.get('xvar', 'lon')
@@ -205,7 +209,7 @@ def shp_series(files: list, variable: str, shp_path: str, **kwargs) -> pd.DataFr
     Examples:
         .. code-block:: python
 
-            data = geomatics.timeseries.shp_series('/path/to/netcdf/', 'AirTemp', '/path/to/shapefile.shp')
+            data = geomatics.timedata.shp_series('/path/to/netcdf/', 'AirTemp', '/path/to/shapefile.shp')
     """
     # for customizing the workflow for standards non-compliant netcdf files
     x_var = kwargs.get('xvar', 'lon')
@@ -265,6 +269,52 @@ def shp_series(files: list, variable: str, shp_path: str, **kwargs) -> pd.DataFr
     return pd.DataFrame(np.transpose(np.asarray([times, values])), columns=['times', 'values'])
 
 
+# NCML
+def generate_timejoining_ncml(files: list, save_dir: str, time_interval: int) -> None:
+    """
+    Generates a ncml file which aggregates a list of netcdf files across the "time" dimension and the "time" variable.
+    In order for the times displayed in the aggregated NCML dataset to be accurate, they must have a regular time step
+    between measurments.
+
+    Args:
+        files: A list of absolute paths to netcdf files (even if len==1)
+        save_dir: the directory where you would like to save the ncml
+        time_interval: the time spacing between datasets in the units of the netcdf file's time variable
+          (must be constont for ncml aggregation to work properly)
+
+    Returns:
+        pandas.DataFrame
+
+    Examples:
+        .. code-block:: python
+
+            data = geomatics.timedata.generate_timejoining_ncml('/path/to/netcdf/', '/path/to/save', 4)
+    """
+    ds = nc.Dataset(files[0])
+    units_str = str(ds['time'].__dict__['units'])
+    ds.close()
+
+    # create a new ncml file by filling in the template with the right dates and writing to a file
+    with open(os.path.join(save_dir, 'time_joined_series.ncml'), 'w') as ncml:
+        ncml.write(
+            '<netcdf xmlns="http://www.unidata.ucar.edu/namespaces/netcdf/ncml-2.2">\n' +
+            '  <variable name="time" type="int" shape="time">\n' +
+            '    <attribute name="units" value="' + units_str + '"/>\n' +
+            '    <attribute name="_CoordinateAxisType" value="Time" />\n' +
+            '    <values start="0" increment="' + str(time_interval) + '" />\n' +
+            '  </variable>\n' +
+            '  <aggregation dimName="time" type="joinExisting" recheckEvery="5 minutes">\n'
+        )
+        for file in files:
+            ncml.write('    <netcdf location="' + file + '"/>\n')
+        ncml.write(
+            '  </aggregation>\n' +
+            '</netcdf>'
+        )
+    return
+
+
+# MODULE LEVEL AUXILIARY TOOLS
 def _open(path, filetype, backend_kwargs=None):
     if backend_kwargs is None:
         backend_kwargs = dict()

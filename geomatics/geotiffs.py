@@ -1,7 +1,7 @@
 import os
 
-import rasterio
 import numpy as np
+import rasterio
 from rasterio.enums import Resampling
 
 __all__ = ['upsample']

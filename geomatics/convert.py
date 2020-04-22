@@ -1,13 +1,14 @@
 import json
-import shapefile
 import os
-import netCDF4
-import xarray
-import pygrib
-import numpy as np
-import rasterio
 
-__all__ = ['geojson_to_shapefile', 'netcdf_to_geotiff', 'grib_to_geotiff', 'detect_type']
+import netCDF4
+import numpy as np
+import pygrib
+import rasterio
+import shapefile
+import xarray
+
+__all__ = ['geojson_to_shapefile', 'netcdf_to_geotiff', 'grib_to_geotiff', 'make_affine_transform', 'detect_type']
 
 
 def geojson_to_shapefile(geojson: dict, savepath: str or os.path) -> None:
@@ -217,7 +218,6 @@ def grib_to_geotiff(files: list, band_number: int, **kwargs):
     return output_files, affine
 
 
-# todo test the affine transform
 def make_affine_transform(file: str, **kwargs) -> dict:
     """
     Determines the information needed to create an affine transformation for a geo-referenced data array.

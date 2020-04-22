@@ -2,7 +2,7 @@
 convert
 =======
 
-Methods for downloading common spatial data
+Methods for converting formats of common spatial data
 
 To Shapefile
 ~~~~~~~~~~~~
@@ -15,4 +15,11 @@ To GeoTIFF
 
 .. automodule:: geomatics.convert
 	:members: netcdf_to_geotiff, grib_to_geotiff
+	:noindex:
+
+File Management
+~~~~~~~~~~~~~~~
+
+.. automodule:: geomatics.convert
+	:members: make_affine_transform, detect_type
 	:noindex:
