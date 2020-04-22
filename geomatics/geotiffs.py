@@ -7,24 +7,20 @@ from rasterio.enums import Resampling
 __all__ = ['upsample']
 
 
-# todo
-def upsample(path, scale):
+def upsample(files: list, scale: float):
     """
     Performs array math to artificially increase the resolution of a geotiff. No interpolation or value resampling.
     A scale factor of X means that the length of a horizontal and vertical grid cell decreases by X. Be careful,
     increasing the resolution by X increases the file size by ~X^2
 
     Args:
-        path: Either 1) the absolute path to a directory containing netcdfs named by date or 2) the absolute path to
-            a single netcdf containing many time values for a specified variable
+        files: A list of absolute paths to the appropriate type of files (even if len==1)
         scale: A positive integer used as the multiplying factor to increase the resolution.
 
     Returns:
         1. A list of paths to the geotiff files created
         2. A rasterio affine transformation used on the geotransform
     """
-    files = path_to_file_list(path, 'geotiff')
-
     # Read raster dimensions
     raster_dim = rasterio.open(files[0])
     width = raster_dim.width

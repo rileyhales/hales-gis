@@ -1,4 +1,4 @@
-import geomatics.convert
+import geomatics.conversions
 import geomatics.data
 import geomatics.geotiffs
 import geomatics.gribs

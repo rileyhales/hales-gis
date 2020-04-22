@@ -47,12 +47,17 @@ def inspect(path):
     return
 
 
-# todo
-def generate_timejoining_ncml(path, save_dir, time_interval=False):
+def generate_timejoining_ncml(files: list, save_dir: str, time_interval: int):
     """
     Generates a ncml file which aggregates a list of netcdf files across the "time" dimension and the "time" variable.
     In order for the times displayed in the aggregated NCML dataset to be accurate, they must have a regular time step
     between measurments.
+
+    Args:
+        files: A list of absolute paths to netcdf files (even if len==1)
+        save_dir: the directory where you would like to save the ncml
+        time_interval: the time spacing between datasets in the units of the netcdf file's time variable
+          (must be constont for ncml aggregation to work properly)
 
     Returns:
         pandas.DataFrame
@@ -60,27 +65,11 @@ def generate_timejoining_ncml(path, save_dir, time_interval=False):
     Examples:
         .. code-block:: python
 
-            data = geomatics.netcdfs.generate_timejoin_ncml('/path/to/netcdf/', '/path/to/save', time_interval=False)
+            data = geomatics.netcdfs.generate_timejoining_ncml('/path/to/netcdf/', '/path/to/save', time_interval=4)
     """
     ds = nc.Dataset(files[0])
     units_str = str(ds['time'].__dict__['units'])
     ds.close()
-
-    # todo
-    # attempt to guess the time interval
-    if not time_interval:
-        times = []
-        for file in files:
-            times += guess_time_from_metadata(nc.Dataset(file))
-        times.sort()
-        time_interval = rd.relativedelta(times[1], times[0])
-        inconsistent = 0
-        for i in range(len(times) - 1):
-            if rd.relativedelta(times[i + 1], times[i]) != time_interval:
-                inconsistent += 1
-        if inconsistent:
-            raise RuntimeWarning(
-                'Inconsistent time step found on {0} steps, aggregated times will be wrong.'.format(inconsistent))
 
     # create a new ncml file by filling in the template with the right dates and writing to a file
     with open(os.path.join(save_dir, 'time_joined_series.ncml'), 'w') as ncml:
@@ -89,7 +78,7 @@ def generate_timejoining_ncml(path, save_dir, time_interval=False):
             '  <variable name="time" type="int" shape="time">\n' +
             '    <attribute name="units" value="' + units_str + '"/>\n' +
             '    <attribute name="_CoordinateAxisType" value="Time" />\n' +
-            '    <values start="0" increment="' + time_interval + '" />\n' +
+            '    <values start="0" increment="' + str(time_interval) + '" />\n' +
             '  </variable>\n' +
             '  <aggregation dimName="time" type="joinExisting" recheckEvery="5 minutes">\n'
         )

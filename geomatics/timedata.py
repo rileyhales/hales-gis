@@ -4,7 +4,7 @@ import rasterio
 import rasterstats
 import xarray as xr
 
-from .data import detect_type
+from .conversions import detect_type
 
 __all__ = ['point_series', 'box_series', 'shp_series']
 

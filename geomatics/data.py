@@ -4,7 +4,7 @@ import os
 
 import requests
 
-__all__ = ['download_noaa_gfs', 'get_livingatlas_geojson', 'detect_type']
+__all__ = ['download_noaa_gfs', 'get_livingatlas_geojson']
 
 
 def download_noaa_gfs(save_path: str, steps: int):
@@ -128,14 +128,3 @@ def get_livingatlas_geojson(location: str) -> dict:
 
     req = requests.get(url=url)
     return json.loads(req.text)
-
-
-def detect_type(path: str) -> str:
-    if path.endswith('.nc') or path.endswith('.nc4'):
-        return 'netcdf'
-    elif path.endswith('.grb') or path.endswith('.grib'):
-        return 'grib'
-    elif path.endswith('.gtiff') or path.endswith('.tiff') or path.endswith('tif'):
-        return 'geotiff'
-    else:
-        raise ValueError('Unconfigured filter type')

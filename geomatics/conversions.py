@@ -2,14 +2,15 @@ import json
 import shapefile
 import os
 import netCDF4
+import xarray
 import pygrib
 import numpy as np
 import rasterio
 
-__all__ = ['geojson_to_shapefile', 'netcdf_to_geotiff', 'grib_to_geotiff']
+__all__ = ['geojson_to_shapefile', 'netcdf_to_geotiff', 'grib_to_geotiff', 'detect_type']
 
 
-def geojson_to_shapefile(geojson, savepath):
+def geojson_to_shapefile(geojson: dict, savepath: str or os.path) -> None:
     """
     Turns a valid dict, json, or geojson containing polygon data in a geographic coordinate system into a shapefile
 
@@ -64,14 +65,12 @@ def geojson_to_shapefile(geojson, savepath):
     return
 
 
-# todo
-def netcdf_to_geotiff(path, variable, **kwargs):
+def netcdf_to_geotiff(files: list, variable: str, **kwargs):
     """
     Converts a certain variable in netcdf files to a geotiff. Assumes WGS1984 GCS.
 
     Args:
-        path: Either 1) the absolute path to a directory containing netcdfs named by date or 2) the absolute path to
-            a single netcdf containing many time values for a specified variable
+        files: A list of absolute paths to the appropriate type of files (even if len==1)
         variable: The name of a variable as it is stored in the netcdf e.g. 'temp' instead of Temperature
 
     Keyword Args:
@@ -87,8 +86,6 @@ def netcdf_to_geotiff(path, variable, **kwargs):
         1. A list of paths to the geotiff files created
         2. A rasterio affine transformation used on the geotransform
     """
-    files = path_to_file_list(path, 'nc')
-
     # parse the optional argument from the kwargs
     x_var = kwargs.get('xvar', 'lon')
     y_var = kwargs.get('yvar', 'lat')
@@ -152,14 +149,12 @@ def netcdf_to_geotiff(path, variable, **kwargs):
     return output_files, affine
 
 
-# todo
-def grib_to_geotiff(path, band_number, **kwargs):
+def grib_to_geotiff(files: list, band_number: int, **kwargs):
     """
     Converts a certain band number in grib files to geotiffs. Assumes WGS1984 GCS.
 
     Args:
-        path: Either 1) the absolute path to a directory containing netcdfs named by date or 2) the absolute path to
-            a single netcdf containing many time values for a specified variable
+        files: A list of absolute paths to the appropriate type of files (even if len==1)
         band_number: The band number for your variable. Try using QGIS, ArcGIS, or pygrib.open().read()
 
     Keyword Args:
@@ -173,8 +168,6 @@ def grib_to_geotiff(path, band_number, **kwargs):
         1. A list of paths to the geotiff files created
         2. A rasterio affine transformation used on the geotransform
     """
-    files = path_to_file_list(path, 'nc')
-
     # parse the optional argument from the kwargs
     save_dir = kwargs.get('save_dir', os.path.dirname(files[0]))
     fill_value = kwargs.get('fill_value', -9999)
@@ -224,6 +217,53 @@ def grib_to_geotiff(path, band_number, **kwargs):
     return output_files, affine
 
 
-# todo
-def grib_to_netcdf():
-    return
+# todo test the affine transform
+def make_affine_transform(file: str, **kwargs) -> dict:
+    """
+    Determines the information needed to create an affine transformation for a geo-referenced data array.
+
+    Args:
+        file: the absolute path to a netcdf or grib file
+
+    Keyword Args:
+        xvar: Name of the x coordinate variable used to spatial reference the array. Default: 'lon' (longitude)
+        yvar: Name of the y coordinate variable used to spatial reference the array. Default: 'lat' (latitude)
+
+    Returns:
+        A dictionary containing the information needed to create the affine tranformation of a dataset.
+    """
+    x_var = kwargs.get('xvar', 'lon')
+    y_var = kwargs.get('yvar', 'lat')
+
+    ds = xarray.open_dataset(file)
+    x_data = ds[x_var].values
+    y_data = ds[y_var].values
+
+    affine_data = {
+        'x_first_val': x_data[0],
+        'x_last_val': x_data[-1],
+        'x_min': x_data.min(),
+        'x_max': x_data.max(),
+        'x_num_values': x_data.size,
+        'x_resolution': x_data[1] - x_data[0],
+
+        'y_first_val': y_data[0],
+        'y_last_val': y_data[-1],
+        'y_min': y_data.min(),
+        'y_max': y_data.max(),
+        'y_num_values': y_data.size,
+        'y_resolution': y_data[1] - y_data[0]
+    }
+
+    return affine_data
+
+
+def detect_type(path: str) -> str:
+    if path.endswith('.nc') or path.endswith('.nc4'):
+        return 'netcdf'
+    elif path.endswith('.grb') or path.endswith('.grib'):
+        return 'grib'
+    elif path.endswith('.gtiff') or path.endswith('.tiff') or path.endswith('tif'):
+        return 'geotiff'
+    else:
+        raise ValueError('Unconfigured filter type')
