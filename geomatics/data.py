@@ -5,8 +5,9 @@ import os
 import netCDF4 as nc
 import pygrib
 import requests
+import xarray as xr
 
-__all__ = ['download_noaa_gfs', 'get_livingatlas_geojson', 'inspect_netcdf', 'inspect_grib']
+__all__ = ['download_noaa_gfs', 'get_livingatlas_geojson', 'inspect_netcdf', 'inspect_grib', '_smart_open']
 
 
 def download_noaa_gfs(save_path: str, steps: int) -> list:
@@ -196,3 +197,14 @@ def inspect_grib(path: str, band_number=0) -> None:
         print(grib[band_number].values)
 
     return
+
+
+def _smart_open(path, filetype, backend_kwargs=None):
+    if backend_kwargs is None:
+        backend_kwargs = dict()
+    if filetype in 'netcdf':
+        return xr.open_dataset(path)
+    elif filetype == 'grib':
+        return xr.open_dataset(path, engine='cfgrib', backend_kwargs=backend_kwargs)
+    else:
+        raise ValueError('unsupported file type')

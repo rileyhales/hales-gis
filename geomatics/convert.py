@@ -1,4 +1,3 @@
-import json
 import os
 
 import netCDF4
@@ -11,24 +10,17 @@ import xarray
 __all__ = ['geojson_to_shapefile', 'netcdf_to_geotiff', 'grib_to_geotiff', 'make_affine_transform', 'detect_type']
 
 
-def geojson_to_shapefile(geojson: dict, savepath: str or os.path) -> None:
+def geojson_to_shapefile(geojson: dict, savepath: str) -> None:
     """
     Turns a valid dict, json, or geojson containing polygon data in a geographic coordinate system into a shapefile
 
     Args:
-        geojson: a valid geojson as a dictionary or json python object
+        geojson: a valid geojson as a dictionary or json python object. try json.loads for strings
         savepath: the full file path to save the shapefile to, including the file_name.shp
 
     Returns:
         None
     """
-    # turn the geojson into a dictionary if it isn't
-    if not isinstance(geojson, dict):
-        try:
-            geojson = json.loads(geojson)
-        except json.JSONDecodeError:
-            raise Exception('Unable to extract a dictionary or json like object from the argument geojson')
-
     # create the shapefile
     fileobject = shapefile.Writer(target=savepath, shpType=shapefile.POLYGON, autoBalance=True)
 
@@ -59,6 +51,8 @@ def geojson_to_shapefile(geojson: dict, savepath: str or os.path) -> None:
     fileobject.close()
 
     # create a prj file
+    if savepath.endswith('.shp'):
+        savepath.replace('.shp', '')
     with open(savepath + '.prj', 'w') as prj:
         prj.write('GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],'
                   'PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]')
@@ -75,8 +69,8 @@ def netcdf_to_geotiff(files: list, variable: str, **kwargs):
         variable: The name of a variable as it is stored in the netcdf e.g. 'temp' instead of Temperature
 
     Keyword Args:
-        xvar: Name of the x coordinate variable used to spatial reference the netcdf array. Default: 'lon' (longitude)
-        yvar: Name of the y coordinate variable used to spatial reference the netcdf array. Default: 'lat' (latitude)
+        xvar: Name of the x coordinate variable used to spatial reference the netcdf array. Default: 'longitude'
+        yvar: Name of the y coordinate variable used to spatial reference the netcdf array. Default: 'latitude'
         save_dir: The directory to store the geotiffs to. Default: directory containing the netcdfs.
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
         crs: Coordinate Reference System used by rasterio.open(). An EPSG ID string such as 'EPSG:4326' or
@@ -88,8 +82,8 @@ def netcdf_to_geotiff(files: list, variable: str, **kwargs):
         2. A rasterio affine transformation used on the geotransform
     """
     # parse the optional argument from the kwargs
-    x_var = kwargs.get('xvar', 'lon')
-    y_var = kwargs.get('yvar', 'lat')
+    x_var = kwargs.get('xvar', 'longitude')
+    y_var = kwargs.get('yvar', 'latitude')
     save_dir = kwargs.get('save_dir', os.path.dirname(files[0]))
     fill_value = kwargs.get('fill_value', -9999)
     crs = kwargs.get('crs', 'EPSG:4326')
@@ -232,8 +226,8 @@ def make_affine_transform(file: str, **kwargs) -> dict:
     Returns:
         A dictionary containing the information needed to create the affine tranformation of a dataset.
     """
-    x_var = kwargs.get('xvar', 'lon')
-    y_var = kwargs.get('yvar', 'lat')
+    x_var = kwargs.get('xvar', 'longitude')
+    y_var = kwargs.get('yvar', 'latitude')
 
     ds = xarray.open_dataset(file)
     x_data = ds[x_var].values

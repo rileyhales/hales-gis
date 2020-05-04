@@ -5,9 +5,9 @@ import numpy as np
 import pandas as pd
 import rasterio
 import rasterstats
-import xarray as xr
 
 from .convert import detect_type
+from .data import _smart_open
 
 __all__ = ['point_series', 'box_series', 'shp_series', 'generate_timejoining_ncml']
 
@@ -24,8 +24,8 @@ def point_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd
             coordinate variable
 
     Keyword Args:
-        xvar: Name of the x coordinate variable used to spatial reference the array. Default: 'lon' (longitude)
-        yvar: Name of the y coordinate variable used to spatial reference the array. Default: 'lat' (latitude)
+        xvar: Name of the x coordinate variable used to spatial reference the array. Default: 'longitude'
+        yvar: Name of the y coordinate variable used to spatial reference the array. Default: 'latitude'
         tvar: Name of the time coordinate variable used for time referencing the data. Default: 'time'
         xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
@@ -39,8 +39,8 @@ def point_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd
             data = geomatics.timedata.point_series('/path/to/data/', 'AirTemp', (10, 20))
     """
     # for customizing the workflow for standards non-compliant netcdf files
-    x_var = kwargs.get('xvar', 'lon')
-    y_var = kwargs.get('yvar', 'lat')
+    x_var = kwargs.get('xvar', 'longitude')
+    y_var = kwargs.get('yvar', 'latitude')
     t_var = kwargs.get('tvar', 'time')
     xr_kwargs = kwargs.get('xr_kwargs', {})
     fill_value = kwargs.get('fill_value', -9999)
@@ -51,7 +51,7 @@ def point_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd
     datatype = detect_type(files[0])
 
     # get a list of the x&y coordinates using the first file as a reference
-    xr_obj = _open(files[0], datatype, xr_kwargs)
+    xr_obj = _smart_open(files[0], datatype, xr_kwargs)
     x_steps = xr_obj[x_var][:].data
     y_steps = xr_obj[y_var][:].data
     # determine the index in the netcdf's coordinates for the xy coordinate provided
@@ -67,7 +67,7 @@ def point_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd
     # iterate over each file extracting the value and time for each
     for file in files:
         # open the file
-        xr_obj = _open(file, datatype, xr_kwargs)
+        xr_obj = _smart_open(file, datatype, xr_kwargs)
         ts = xr_obj[t_var].data
 
         # extract the correct values from the array and
@@ -98,12 +98,12 @@ def box_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd.D
     Args:
         files: A list of absolute paths to netcdf or gribs files (even if len==1)
         variable: The name of a variable as it is stored in the file e.g. often 'temp' or 'T' instead of Temperature
-        coordinates: A tuple of the format (x_value, y_value) where the xy values are in units of the x and y
-            coordinate variable
+        coordinates: A tuple of the format (min_x_value, min_y_value, max_x_value, max_y_value) where the xy values are
+            in units of the x and y coordinate variable
 
     Keyword Args:
-        xvar: Name of the x coordinate variable used to spatial reference the array. Default: 'lon' (longitude)
-        yvar: Name of the y coordinate variable used to spatial reference the array. Default: 'lat' (latitude)
+        xvar: Name of the x coordinate variable used to spatial reference the array. Default: 'longitude'
+        yvar: Name of the y coordinate variable used to spatial reference the array. Default: 'latitude'
         tvar: Name of the time coordinate variable used for time referencing the data. Default: 'time'
         xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
@@ -118,8 +118,8 @@ def box_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd.D
             data = geomatics.timedata.box_series('/path/to/netcdf/', 'AirTemp', (10, 20, 15, 25))
     """
     # for customizing the workflow for standards non-compliant netcdf files
-    x_var = kwargs.get('xvar', 'lon')
-    y_var = kwargs.get('yvar', 'lat')
+    x_var = kwargs.get('xvar', 'longitude')
+    y_var = kwargs.get('yvar', 'latitude')
     t_var = kwargs.get('tvar', 'time')
     xr_kwargs = kwargs.get('xr_kwargs', {})
     fill_value = kwargs.get('fill_value', -9999)
@@ -131,7 +131,7 @@ def box_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd.D
     datatype = detect_type(files[0])
 
     # get a list of the x&y coordinates using the first file as a reference
-    xr_obj = _open(files[0], datatype, xr_kwargs)
+    xr_obj = _smart_open(files[0], datatype, xr_kwargs)
     x_steps = xr_obj[x_var][:].data
     y_steps = xr_obj[y_var][:].data
     # get the indices of the bounding box corners
@@ -154,7 +154,7 @@ def box_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd.D
     # iterate over each file extracting the value and time for each
     for file in files:
         # open the file
-        xr_obj = _open(file, datatype, xr_kwargs)
+        xr_obj = _smart_open(file, datatype, xr_kwargs)
         ts = xr_obj[t_var].data
 
         # slice the variable's array, returns array with shape corresponding to dimension order and size
@@ -196,8 +196,8 @@ def shp_series(files: list, variable: str, shp_path: str, **kwargs) -> pd.DataFr
         shp_path: An absolute path to the .shp file in a shapefile. Must be in Geographic Coordinate System WGS 1984
 
     Keyword Args:
-        xvar: Name of the x coordinate variable used to spatial reference the array. Default: 'lon' (longitude)
-        yvar: Name of the y coordinate variable used to spatial reference the array. Default: 'lat' (latitude)
+        xvar: Name of the x coordinate variable used to spatial reference the array. Default: 'longitude'
+        yvar: Name of the y coordinate variable used to spatial reference the array. Default: 'latitude'
         tvar: Name of the time coordinate variable used for time referencing the data. Default: 'time'
         xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
@@ -212,8 +212,8 @@ def shp_series(files: list, variable: str, shp_path: str, **kwargs) -> pd.DataFr
             data = geomatics.timedata.shp_series('/path/to/netcdf/', 'AirTemp', '/path/to/shapefile.shp')
     """
     # for customizing the workflow for standards non-compliant netcdf files
-    x_var = kwargs.get('xvar', 'lon')
-    y_var = kwargs.get('yvar', 'lat')
+    x_var = kwargs.get('xvar', 'longitude')
+    y_var = kwargs.get('yvar', 'latitude')
     t_var = kwargs.get('tvar', 'time')
     xr_kwargs = kwargs.get('xr_kwargs', {})
     fill_value = kwargs.get('fill_value', -9999)
@@ -225,10 +225,11 @@ def shp_series(files: list, variable: str, shp_path: str, **kwargs) -> pd.DataFr
     datatype = detect_type(files[0])
 
     # get a list of the x&y coordinates using the first file as a reference
-    xr_obj = _open(files[0], datatype, xr_kwargs)
+    xr_obj = _smart_open(files[0], datatype, xr_kwargs)
     nc_xs = xr_obj.variables[x_var][:]
     nc_ys = xr_obj.variables[y_var][:]
     affine = rasterio.transform.from_origin(nc_xs.min(), nc_ys.max(), nc_ys[1] - nc_ys[0], nc_xs[1] - nc_xs[0])
+    print(nc_xs.min(), nc_ys.max(), nc_ys[1] - nc_ys[0], nc_xs[1] - nc_xs[0])
     dim_order = _get_dimension_order(xr_obj[variable].dims, x_var, y_var, t_var)
     xr_obj.close()
 
@@ -239,17 +240,28 @@ def shp_series(files: list, variable: str, shp_path: str, **kwargs) -> pd.DataFr
     # iterate over each file extracting the value and time for each
     for file in files:
         # open the file
-        xr_obj = _open(file, datatype, xr_kwargs)
-        ts = xr_obj[t_var][:].data
+        xr_obj = _smart_open(file, datatype, xr_kwargs)
+        ts = xr_obj[t_var].data
 
         # slice the variable's array, returns array with shape corresponding to dimension order and size
         values_array = xr_obj[variable][:].data
-        # roll axis brings the time dimension to the front so we can iterate over it
-        for values_2d in np.rollaxis(values_array, dim_order.index('t')):
-            # drop fill and no data entries
-            values_2d[values_2d == fill_value] = np.nan
-            # vertically flip array so the orientation is right (you just have to, try it)
-            values_2d = values_2d[::-1]
+        # drop fill and no data entries
+        values_array[values_array == fill_value] = np.nan
+
+        # modify the array as necessary
+        if values_array.ndim == 2:
+            # if the values are in a 2D array, cushion it with a 3rd dimension so you can iterate
+            values_array = np.reshape(values_array, [1] + list(np.shape(values_array)))
+            dim_order = 't' + dim_order
+        if 't' in dim_order:
+            # roll axis brings the time dimension to the front so we can iterate over it
+            values_array = np.rollaxis(values_array, dim_order.index('t'))
+
+        # do zonal statistics on everything
+        for values_2d in values_array:
+            print(type(values_2d))
+            print(values_2d.ndim)
+            print(affine)
             # actually do the gis to get the value within the shapefile
             stats = rasterstats.zonal_stats(shp_path, values_2d, affine=affine, nodata=np.nan, stats=stat)
             # if your shapefile has many polygons, you get many values back. weighted average of those values.
@@ -315,17 +327,6 @@ def generate_timejoining_ncml(files: list, save_dir: str, time_interval: int) ->
 
 
 # MODULE LEVEL AUXILIARY TOOLS
-def _open(path, filetype, backend_kwargs=None):
-    if backend_kwargs is None:
-        backend_kwargs = dict()
-    if filetype in 'netcdf':
-        return xr.open_dataset(path)
-    elif filetype == 'grib':
-        return xr.open_dataset(path, engine='cfgrib', backend_kwargs=backend_kwargs)
-    else:
-        raise ValueError('unsupported file type')
-
-
 def _slice_point(xarray_variable, dim_order, x_index, y_index):
     if dim_order == 'txy':
         return xarray_variable[:, x_index, y_index].data
