@@ -7,11 +7,11 @@ from rasterio.enums import Resampling
 __all__ = ['upsample']
 
 
-def upsample(files: list, scale: float):
+def upsample(files: list, scale: float) -> list:
     """
-    Performs array math to artificially increase the resolution of a geotiff. No interpolation or value resampling.
-    A scale factor of X means that the length of a horizontal and vertical grid cell decreases by X. Be careful,
-    increasing the resolution by X increases the file size by ~X^2
+    Performs array math to artificially increase the resolution of a geotiff. No interpolation of values. A scale
+    factor of X means that the length of a horizontal and vertical grid cell decreases by X. Be careful, increasing the
+    resolution by X increases the file size by ~X^2
 
     Args:
         files: A list of absolute paths to the appropriate type of files (even if len==1)
@@ -61,4 +61,4 @@ def upsample(files: list, scale: float):
         ) as dst:
             dst.write(data, 1)
 
-    return new_files, affine_resampled
+    return new_files

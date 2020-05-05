@@ -1,0 +1,10 @@
+rasterio
+rasterstats
+pygrib
+netcdf4
+python-dateutil
+numpy
+pandas
+requests
+pyshp
+xarray

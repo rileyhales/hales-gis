@@ -7,7 +7,8 @@ import pygrib
 import requests
 import xarray as xr
 
-__all__ = ['download_noaa_gfs', 'get_livingatlas_geojson', 'inspect_netcdf', 'inspect_grib', '_smart_open']
+__all__ = ['download_noaa_gfs', 'get_livingatlas_geojson', 'inspect_netcdf', 'inspect_grib', 'detect_type',
+           '_smart_open']
 
 
 def download_noaa_gfs(save_path: str, steps: int) -> list:
@@ -49,8 +50,8 @@ def download_noaa_gfs(save_path: str, steps: int) -> list:
     downloaded_files = []
     for step in fc_time_steps:
         # build the url to download the file from
-        url = 'https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl?file=gfs.t' + fc_hour + 'z.pgrb2.0p25.f' + \
-              step + '&all_lev=on&all_var=on&dir=%2Fgfs.' + fc_date + '%2F' + fc_hour
+        url = f'https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl?file=' \
+              f'gfs.t{fc_hour}z.pgrb2.0p25.f{step}&all_lev=on&all_var=on&dir=%2Fgfs.{fc_date}%2F{fc_hour}'
 
         # set the file name: gfs_DATEofFORECAST_TIMESTEPofFORECAST.grb
         file_timestep = timestamp + datetime.timedelta(hours=int(step))
@@ -76,7 +77,7 @@ def get_livingatlas_geojson(location: str) -> dict:
         location: the name of the Country or World Region, properly spelled and capitalized
 
     Returns:
-        a json python object, dict like
+        dict
     """
     countries = [
         'Afghanistan', 'Albania', 'Algeria', 'American Samoa', 'Andorra', 'Angola', 'Anguilla', 'Antarctica',
@@ -125,7 +126,8 @@ def get_livingatlas_geojson(location: str) -> dict:
     if location in regions:
         url = base + 'World_Regions/FeatureServer/0/query?f=pgeojson&outSR=4326&where=REGION+%3D+%27' + location + '%27'
     elif location in countries:
-        url = base + 'World__Countries_Generalized_analysis_trim/FeatureServer/0/query?f=pgeojson&outSR=4326&where=NAME+%3D+%27' + location + '%27'
+        url = base + f'World__Countries_Generalized_analysis_trim/FeatureServer/0/query?' \
+                     f'f=pgeojson&outSR=4326&where=NAME+%3D+%27{location}%27'
     else:
         raise Exception('Country or World Region not recognized')
 
@@ -146,36 +148,36 @@ def inspect_netcdf(path: str) -> None:
     print(nc_obj)
     print()
 
-    print("There are " + str(len(nc_obj.variables)) + " variables")       # The number of variables
-    print("There are " + str(len(nc_obj.dimensions)) + " dimensions")     # The number of dimensions
+    print("There are " + str(len(nc_obj.variables)) + " variables")  # The number of variables
+    print("There are " + str(len(nc_obj.dimensions)) + " dimensions")  # The number of dimensions
     print()
 
     print('These are the global attributes of the netcdf file')
-    print(nc_obj.__dict__)                                    # access the global attributes of the netcdf file
+    print(nc_obj.__dict__)  # access the global attributes of the netcdf file
     print()
 
     print("Detailed view of each variable")
     print()
-    for variable in nc_obj.variables.keys():                  # .keys() gets the name of each variable
-        print('Variable Name:  ' + variable)              # The string name of the variable
+    for variable in nc_obj.variables.keys():  # .keys() gets the name of each variable
+        print('Variable Name:  ' + variable)  # The string name of the variable
         print('The view of this variable in the netCDF python object')
-        print(nc_obj[variable])                               # How to view the variable information (netcdf obj)
+        print(nc_obj[variable])  # How to view the variable information (netcdf obj)
         print('The data array stored in this variable')
-        print(nc_obj[variable][:])                            # Access the numpy array inside the variable (array)
+        print(nc_obj[variable][:])  # Access the numpy array inside the variable (array)
         print('The dimensions associated with this variable')
-        print(nc_obj[variable].dimensions)                    # Get the dimensions associated with a variable (tuple)
+        print(nc_obj[variable].dimensions)  # Get the dimensions associated with a variable (tuple)
         print('The metadata associated with this variable')
-        print(nc_obj[variable].__dict__)                      # How to get the attributes of a variable (dictionary)
+        print(nc_obj[variable].__dict__)  # How to get the attributes of a variable (dictionary)
         print()
 
     for dimension in nc_obj.dimensions.keys():
-        print(nc_obj.dimensions[dimension].size)              # print the size of a dimension
+        print(nc_obj.dimensions[dimension].size)  # print the size of a dimension
 
-    nc_obj.close()                                            # close the file connection to the file
+    nc_obj.close()  # close the file connection to the file
     return
 
 
-def inspect_grib(path: str, band_number=0) -> None:
+def inspect_grib(path: str, band_number: int = 0) -> None:
     """
     Prints lots of messages showing information about variables, dimensions, and metadata
 
@@ -199,7 +201,20 @@ def inspect_grib(path: str, band_number=0) -> None:
     return
 
 
-def _smart_open(path, filetype, backend_kwargs=None):
+def detect_type(path: str) -> str:
+    if path.endswith('.nc') or path.endswith('.nc4'):
+        return 'netcdf'
+    elif path.endswith('.grb') or path.endswith('.grib'):
+        return 'grib'
+    elif path.endswith('.gtiff') or path.endswith('.tiff') or path.endswith('tif'):
+        return 'geotiff'
+    else:
+        raise ValueError('Unconfigured filter type')
+
+
+def _smart_open(path: str, filetype: str = None, backend_kwargs: dict = None):
+    if filetype is None:
+        filetype = detect_type(path)
     if backend_kwargs is None:
         backend_kwargs = dict()
     if filetype in 'netcdf':

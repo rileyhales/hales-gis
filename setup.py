@@ -2,15 +2,17 @@ from setuptools import setup
 
 version = '0.8'
 
-with open("README.md", "r") as readme:
+with open('README.md', 'r') as readme:
     long_description = readme.read()
+
+with open('requirements.txt', 'r') as req:
+    install_requires = req.read().splitlines()
 
 setup(
     name='geomatics',
     packages=['geomatics'],
     version=version,
-    description='Geospatial tools in pure python developed by Riley Hales as part of a Master\'s Thesis '
-                'at Brigham Young University',
+    description='Geospatial tools for handling timeseries netcdf and grib files in pure python.',
     long_description=long_description,
     long_description_content_type="text/markdown",
     author='Riley Hales',
@@ -18,5 +20,17 @@ setup(
                       Source='https://github.com/rileyhales/geomatics'),
     license='BSD 3-Clause',
     python_requires='>=3',
-    install_requires=['rasterio', 'rasterstats', 'pygrib', 'netcdf4', 'python-dateutil', 'numpy', 'pandas', 'requests']
+    classifiers=[
+        'Topic :: Scientific/Engineering :: GIS',
+        'Topic :: Scientific/Engineering :: Information Analysis',
+        'Intended Audience :: Science/Research',
+        'License :: OSI Approved :: BSD License',
+        'Natural Language :: English',
+    ],
+    install_requires=install_requires
 )
+
+# todo write and run tests on everything
+# todo add notes in docs about default variable names, backend kwargs for gfs gribs, etc
+# todo update docs to show new methods
+# todo finish docstrings

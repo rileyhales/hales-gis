@@ -1,6 +1,7 @@
 # geomatics
 
-Geospatial tools in pure python developed by Riley Hales as part of a Master's Thesis at Brigham Young University.
+Geospatial tools in pure python developed by Riley Hales as part of a Master's Thesis in Civil and Environmental 
+Engineering at Brigham Young University.
 
 https://geomatics.readthedocs.io  
 https://github.com/conda-forge/geomatics-feedstock

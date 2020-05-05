@@ -1,13 +1,14 @@
 import os
 
-import netCDF4
+import netCDF4 as nc
 import numpy as np
 import pygrib
 import rasterio
 import shapefile
-import xarray
 
-__all__ = ['geojson_to_shapefile', 'netcdf_to_geotiff', 'grib_to_geotiff', 'make_affine_transform', 'detect_type']
+from .prj import affine_trans_from_netcdf_file, affine_trans_from_grib_file
+
+__all__ = ['geojson_to_shapefile', 'netcdf_to_geotiff', 'grib_to_geotiff']
 
 
 def geojson_to_shapefile(geojson: dict, savepath: str) -> None:
@@ -60,50 +61,33 @@ def geojson_to_shapefile(geojson: dict, savepath: str) -> None:
     return
 
 
-def netcdf_to_geotiff(files: list, variable: str, **kwargs):
+def netcdf_to_geotiff(files: list,
+                      variable: str,
+                      crs: str = 'EPSG:4326',
+                      x_var: str = 'longitude',
+                      y_var: str = 'latitude',
+                      fill_value: int = -9999,
+                      save_dir: str = False,
+                      delete_sources: bool = False) -> list:
     """
-    Converts a certain variable in netcdf files to a geotiff. Assumes WGS1984 GCS.
+    Converts the array of data for a certain variable in a netcdf file to a geotiff.
 
     Args:
         files: A list of absolute paths to the appropriate type of files (even if len==1)
         variable: The name of a variable as it is stored in the netcdf e.g. 'temp' instead of Temperature
-
-    Keyword Args:
-        xvar: Name of the x coordinate variable used to spatial reference the netcdf array. Default: 'longitude'
-        yvar: Name of the y coordinate variable used to spatial reference the netcdf array. Default: 'latitude'
-        save_dir: The directory to store the geotiffs to. Default: directory containing the netcdfs.
-        fill_value: The value used for filling no_data spaces in the array. Default: -9999
         crs: Coordinate Reference System used by rasterio.open(). An EPSG ID string such as 'EPSG:4326' or
             '+proj=latlong'
-        delete_source: Allows you to delete the source netcdfs as they are converted. Default: False
+        x_var: Name of the x coordinate variable used to spatial reference the netcdf array. Default: 'longitude'
+        y_var: Name of the y coordinate variable used to spatial reference the netcdf array. Default: 'latitude'
+        save_dir: The directory to store the geotiffs to. Default: directory containing the netcdfs.
+        fill_value: The value used for filling no_data spaces in the array. Default: -9999
+        delete_sources: Allows you to delete the source netcdfs as they are converted. Default: False
 
     Returns:
-        1. A list of paths to the geotiff files created
-        2. A rasterio affine transformation used on the geotransform
+        A list of paths to the geotiff files created
     """
-    # parse the optional argument from the kwargs
-    x_var = kwargs.get('xvar', 'longitude')
-    y_var = kwargs.get('yvar', 'latitude')
-    save_dir = kwargs.get('save_dir', os.path.dirname(files[0]))
-    fill_value = kwargs.get('fill_value', -9999)
-    crs = kwargs.get('crs', 'EPSG:4326')
-    delete_sources = kwargs.get('delete_sources', False)
-
-    # open the first netcdf and collect georeferencing information
-    nc_obj = netCDF4.Dataset(files[0], 'r')
-    lat = nc_obj.variables[x_var][:]
-    lon = nc_obj.variables[y_var][:]
-    lon_min = lon.min()
-    lon_max = lon.max()
-    lat_min = lat.min()
-    lat_max = lat.max()
-    data = nc_obj[variable][:][0]
-    height = data.shape[0]
-    width = data.shape[1]
-    nc_obj.close()
-
-    # Geotransform for each of the netcdf files
-    affine = rasterio.transform.from_bounds(lon_min, lat_min, lon_max, lat_max, width, height)
+    # determine the affine transformation
+    affine = affine_trans_from_netcdf_file(files[0], variable, x_var, y_var)
 
     # A list of all the files that get written which can be returned
     output_files = []
@@ -115,7 +99,7 @@ def netcdf_to_geotiff(files: list, variable: str, **kwargs):
         output_files.append(save_path)
 
         # open the netcdf and get the data array
-        nc_obj = netCDF4.Dataset(file, 'r')
+        nc_obj = nc.Dataset(file, 'r')
         array = np.asarray(nc_obj[variable][:])
         array = array[0]
         array[array == fill_value] = np.nan  # If you have fill values, change the comparator to git rid of it
@@ -131,54 +115,42 @@ def netcdf_to_geotiff(files: list, variable: str, **kwargs):
                 save_path,
                 'w',
                 driver='GTiff',
-                height=data.shape[0],
-                width=data.shape[1],
+                height=array.shape[0],
+                width=array.shape[1],
                 count=1,
-                dtype=data.dtype,
+                dtype=array.dtype,
                 nodata=np.nan,
                 crs=crs,
                 transform=affine,
         ) as dst:
             dst.write(array, 1)
 
-    return output_files, affine
+    return output_files
 
 
-def grib_to_geotiff(files: list, band_number: int, **kwargs):
+def grib_to_geotiff(files: list,
+                    band_number: int,
+                    crs: str = 'EPSG:4326',
+                    fill_value: int = -9999,
+                    save_dir: str = False,
+                    delete_sources: bool = False) -> list:
     """
     Converts a certain band number in grib files to geotiffs. Assumes WGS1984 GCS.
 
     Args:
         files: A list of absolute paths to the appropriate type of files (even if len==1)
-        band_number: The band number for your variable. Try using QGIS, ArcGIS, or pygrib.open().read()
-
-    Keyword Args:
+        band_number: # todo
         save_dir: The directory to store the geotiffs to. Default: directory containing the gribs.
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
+        delete_sources: Allows you to delete the source gribs as they are converted. Default: False
         crs: Coordinate Reference System used by rasterio.open(). An EPSG ID string such as 'EPSG:4326' or
             '+proj=latlong'
-        delete_source: Allows you to delete the source gribs as they are converted. Default: False
 
     Returns:
-        1. A list of paths to the geotiff files created
-        2. A rasterio affine transformation used on the geotransform
+        A list of paths to the geotiff files created
     """
-    # parse the optional argument from the kwargs
-    save_dir = kwargs.get('save_dir', os.path.dirname(files[0]))
-    fill_value = kwargs.get('fill_value', -9999)
-    delete_sources = kwargs.get('delete_sources', False)
-    crs = kwargs.get('crs', 'EPSG:4326')
-
-    # Read raster dimensions only once to apply to all rasters
-    raster_dim = rasterio.open(files[0])
-    width = raster_dim.width
-    height = raster_dim.height
-    lon_min = raster_dim.bounds.left
-    lon_max = raster_dim.bounds.right
-    lat_min = raster_dim.bounds.bottom
-    lat_max = raster_dim.bounds.top
-    # Geotransform for each 24-hr raster (east, south, west, north, width, height)
-    affine = rasterio.transform.from_bounds(lon_min, lat_min, lon_max, lat_max, width, height)
+    # determine the affine transformation
+    affine = affine_trans_from_grib_file(files[0])
 
     # A list of all the files that get written which can be returned
     output_files = []
@@ -209,55 +181,4 @@ def grib_to_geotiff(files: list, band_number: int, **kwargs):
         if delete_sources:
             os.remove(file)
 
-    return output_files, affine
-
-
-def make_affine_transform(file: str, **kwargs) -> dict:
-    """
-    Determines the information needed to create an affine transformation for a geo-referenced data array.
-
-    Args:
-        file: the absolute path to a netcdf or grib file
-
-    Keyword Args:
-        xvar: Name of the x coordinate variable used to spatial reference the array. Default: 'lon' (longitude)
-        yvar: Name of the y coordinate variable used to spatial reference the array. Default: 'lat' (latitude)
-
-    Returns:
-        A dictionary containing the information needed to create the affine tranformation of a dataset.
-    """
-    x_var = kwargs.get('xvar', 'longitude')
-    y_var = kwargs.get('yvar', 'latitude')
-
-    ds = xarray.open_dataset(file)
-    x_data = ds[x_var].values
-    y_data = ds[y_var].values
-
-    affine_data = {
-        'x_first_val': x_data[0],
-        'x_last_val': x_data[-1],
-        'x_min': x_data.min(),
-        'x_max': x_data.max(),
-        'x_num_values': x_data.size,
-        'x_resolution': x_data[1] - x_data[0],
-
-        'y_first_val': y_data[0],
-        'y_last_val': y_data[-1],
-        'y_min': y_data.min(),
-        'y_max': y_data.max(),
-        'y_num_values': y_data.size,
-        'y_resolution': y_data[1] - y_data[0]
-    }
-
-    return affine_data
-
-
-def detect_type(path: str) -> str:
-    if path.endswith('.nc') or path.endswith('.nc4'):
-        return 'netcdf'
-    elif path.endswith('.grb') or path.endswith('.grib'):
-        return 'grib'
-    elif path.endswith('.gtiff') or path.endswith('.tiff') or path.endswith('tif'):
-        return 'geotiff'
-    else:
-        raise ValueError('Unconfigured filter type')
+    return output_files

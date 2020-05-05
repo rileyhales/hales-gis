@@ -6,14 +6,21 @@ import pandas as pd
 import rasterio
 import rasterstats
 
-from .convert import detect_type
 from .data import _smart_open
 
 __all__ = ['point_series', 'box_series', 'shp_series', 'generate_timejoining_ncml']
 
 
 # TIMESERIES FUNCTIONS
-def point_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd.DataFrame:
+def point_series(files: list,
+                 variable: str,
+                 coordinates: tuple,
+                 file_type: str = None,
+                 x_var: str = 'longitude',
+                 y_var: str = 'latitude',
+                 t_var: str = 'time',
+                 xr_kwargs: dict = {},
+                 fill_value: int = -9999) -> pd.DataFrame:
     """
     Creates a timeseries of values at the grid cell closest to a specified point.
 
@@ -22,11 +29,10 @@ def point_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd
         variable: The name of a variable as it is stored in the file e.g. often 'temp' or 'T' instead of Temperature
         coordinates: A tuple of the format (x_value, y_value) where the xy values are in units of the x and y
             coordinate variable
-
-    Keyword Args:
-        xvar: Name of the x coordinate variable used to spatial reference the array. Default: 'longitude'
-        yvar: Name of the y coordinate variable used to spatial reference the array. Default: 'latitude'
-        tvar: Name of the time coordinate variable used for time referencing the data. Default: 'time'
+        file_type: The format of the data in the list of file paths provided by the files argument
+        x_var: Name of the x coordinate variable used to spatial reference the array. Default: 'longitude'
+        y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'latitude'
+        t_var: Name of the time coordinate variable used for time referencing the data. Default: 'time'
         xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
 
@@ -36,22 +42,10 @@ def point_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd
     Examples:
         .. code-block:: python
 
-            data = geomatics.timedata.point_series('/path/to/data/', 'AirTemp', (10, 20))
+            data = geomatics.timedata.point_series([list, of, file, paths], 'AirTemp', (10, 20))
     """
-    # for customizing the workflow for standards non-compliant netcdf files
-    x_var = kwargs.get('xvar', 'longitude')
-    y_var = kwargs.get('yvar', 'latitude')
-    t_var = kwargs.get('tvar', 'time')
-    xr_kwargs = kwargs.get('xr_kwargs', {})
-    fill_value = kwargs.get('fill_value', -9999)
-
-    # determine what kind of spatial data was provided
-    if isinstance(files, str):
-        files = [files]
-    datatype = detect_type(files[0])
-
     # get a list of the x&y coordinates using the first file as a reference
-    xr_obj = _smart_open(files[0], datatype, xr_kwargs)
+    xr_obj = _smart_open(files[0], file_type, xr_kwargs)
     x_steps = xr_obj[x_var][:].data
     y_steps = xr_obj[y_var][:].data
     # determine the index in the netcdf's coordinates for the xy coordinate provided
@@ -67,14 +61,14 @@ def point_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd
     # iterate over each file extracting the value and time for each
     for file in files:
         # open the file
-        xr_obj = _smart_open(file, datatype, xr_kwargs)
+        xr_obj = _smart_open(file, file_type, xr_kwargs)
         ts = xr_obj[t_var].data
 
         # extract the correct values from the array and
         vs = _slice_point(xr_obj[variable], dim_order, x_index, y_index)
         vs[vs == fill_value] = np.nan
 
-        # add the results to the lists of values and times
+        # add the results to the lists of values and times depending on the size of the array extracted
         if vs.ndim == 0:
             values.append(vs)
         else:
@@ -91,7 +85,16 @@ def point_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd
     return pd.DataFrame(np.transpose(np.asarray([times, values])), columns=['times', 'values'])
 
 
-def box_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd.DataFrame:
+def box_series(files: list,
+               variable: str,
+               coordinates: tuple,
+               file_type: str = None,
+               x_var: str = 'longitude',
+               y_var: str = 'latitude',
+               t_var: str = 'time',
+               xr_kwargs: dict = {},
+               fill_value: int = -9999,
+               stat_type: str = 'mean') -> pd.DataFrame:
     """
     Creates a timeseries of values based on values within a bounding box specified by your coordinates.
 
@@ -100,14 +103,13 @@ def box_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd.D
         variable: The name of a variable as it is stored in the file e.g. often 'temp' or 'T' instead of Temperature
         coordinates: A tuple of the format (min_x_value, min_y_value, max_x_value, max_y_value) where the xy values are
             in units of the x and y coordinate variable
-
-    Keyword Args:
-        xvar: Name of the x coordinate variable used to spatial reference the array. Default: 'longitude'
-        yvar: Name of the y coordinate variable used to spatial reference the array. Default: 'latitude'
-        tvar: Name of the time coordinate variable used for time referencing the data. Default: 'time'
+        file_type: The format of the data in the list of file paths provided by the files argument
+        x_var: Name of the x coordinate variable used to spatial reference the array. Default: 'longitude'
+        y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'latitude'
+        t_var: Name of the time coordinate variable used for time referencing the data. Default: 'time'
         xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
-        stat_type: The stats method to turn the values within the bounding box into a single value. Default: 'mean'
+        stat_type: The method to turn the values within a bounding box into a single value. Eg mean, min, max
 
     Returns:
         pandas.DataFrame
@@ -115,23 +117,10 @@ def box_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd.D
     Examples:
         .. code-block:: python
 
-            data = geomatics.timedata.box_series('/path/to/netcdf/', 'AirTemp', (10, 20, 15, 25))
+            data = geomatics.timedata.box_series([list, of, file, paths], 'AirTemp', (10, 20, 15, 25))
     """
-    # for customizing the workflow for standards non-compliant netcdf files
-    x_var = kwargs.get('xvar', 'longitude')
-    y_var = kwargs.get('yvar', 'latitude')
-    t_var = kwargs.get('tvar', 'time')
-    xr_kwargs = kwargs.get('xr_kwargs', {})
-    fill_value = kwargs.get('fill_value', -9999)
-    stat = kwargs.get('stat_type', 'mean')
-
-    # determine what kind of spatial data was provided
-    if isinstance(files, str):
-        files = [files]
-    datatype = detect_type(files[0])
-
     # get a list of the x&y coordinates using the first file as a reference
-    xr_obj = _smart_open(files[0], datatype, xr_kwargs)
+    xr_obj = _smart_open(files[0], file_type, xr_kwargs)
     x_steps = xr_obj[x_var][:].data
     y_steps = xr_obj[y_var][:].data
     # get the indices of the bounding box corners
@@ -154,20 +143,20 @@ def box_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd.D
     # iterate over each file extracting the value and time for each
     for file in files:
         # open the file
-        xr_obj = _smart_open(file, datatype, xr_kwargs)
+        xr_obj = _smart_open(file, file_type, xr_kwargs)
         ts = xr_obj[t_var].data
 
         # slice the variable's array, returns array with shape corresponding to dimension order and size
         values_array = _slice_box(xr_obj[variable], dim_order, xmin_index, ymin_index, xmax_index, ymax_index)
         values_array[values_array == fill_value] = np.nan
-        if stat == 'mean':
+        if stat_type == 'mean':
             vs = np.mean(values_array)
-        elif stat == 'max':
+        elif stat_type == 'max':
             vs = np.max(values_array)
-        elif stat == 'min':
+        elif stat_type == 'min':
             vs = np.min(values_array)
         else:
-            raise ValueError('Unrecognized statistic, {0}. Choose stat_type= mean, min or max'.format(stat))
+            raise ValueError(f'Unrecognized statistic, {stat_type}. Use stat_type= mean, min or max')
 
         # add the results to the lists of values and times
         if vs.ndim == 0:
@@ -186,19 +175,27 @@ def box_series(files: list, variable: str, coordinates: tuple, **kwargs) -> pd.D
     return pd.DataFrame(np.transpose(np.asarray([times, values])), columns=['times', 'values'])
 
 
-def shp_series(files: list, variable: str, shp_path: str, **kwargs) -> pd.DataFrame:
+def shp_series(files: list,
+               variable: str,
+               shp_path: str,
+               file_type: str = None,
+               x_var: str = 'longitude',
+               y_var: str = 'latitude',
+               t_var: str = 'time',
+               xr_kwargs: dict = {},
+               fill_value: int = -9999,
+               stat_type: str = 'mean') -> pd.DataFrame:
     """
     Creates a timeseries of values within the boundaries of your polygon shapefile of the same coordinate system.
 
     Args:
         files: A list of absolute paths to netcdf or gribs files (even if len==1)
         variable: The name of a variable as it is stored in the file e.g. often 'temp' or 'T' instead of Temperature
-        shp_path: An absolute path to the .shp file in a shapefile. Must be in Geographic Coordinate System WGS 1984
-
-    Keyword Args:
-        xvar: Name of the x coordinate variable used to spatial reference the array. Default: 'longitude'
-        yvar: Name of the y coordinate variable used to spatial reference the array. Default: 'latitude'
-        tvar: Name of the time coordinate variable used for time referencing the data. Default: 'time'
+        shp_path: An absolute path to the .shp file in a shapefile. Must be same coord system as the raster data.
+        file_type: The format of the data in the list of file paths provided by the files argument
+        x_var: Name of the x coordinate variable used to spatial reference the array. Default: 'longitude'
+        y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'latitude'
+        t_var: Name of the time coordinate variable used for time referencing the data. Default: 'time'
         xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
         stat_type: The stats method to turn the values within the bounding box into a single value. Default: 'mean'
@@ -209,27 +206,13 @@ def shp_series(files: list, variable: str, shp_path: str, **kwargs) -> pd.DataFr
     Examples:
         .. code-block:: python
 
-            data = geomatics.timedata.shp_series('/path/to/netcdf/', 'AirTemp', '/path/to/shapefile.shp')
+            data = geomatics.timedata.shp_series([list, of, file, paths], 'AirTemp', '/path/to/shapefile.shp')
     """
-    # for customizing the workflow for standards non-compliant netcdf files
-    x_var = kwargs.get('xvar', 'longitude')
-    y_var = kwargs.get('yvar', 'latitude')
-    t_var = kwargs.get('tvar', 'time')
-    xr_kwargs = kwargs.get('xr_kwargs', {})
-    fill_value = kwargs.get('fill_value', -9999)
-    stat = kwargs.get('stat_type', 'mean')
-
-    # determine what kind of spatial data was provided
-    if isinstance(files, str):
-        files = [files]
-    datatype = detect_type(files[0])
-
     # get a list of the x&y coordinates using the first file as a reference
-    xr_obj = _smart_open(files[0], datatype, xr_kwargs)
+    xr_obj = _smart_open(files[0], file_type, xr_kwargs)
     nc_xs = xr_obj.variables[x_var][:]
     nc_ys = xr_obj.variables[y_var][:]
     affine = rasterio.transform.from_origin(nc_xs.min(), nc_ys.max(), nc_ys[1] - nc_ys[0], nc_xs[1] - nc_xs[0])
-    print(nc_xs.min(), nc_ys.max(), nc_ys[1] - nc_ys[0], nc_xs[1] - nc_xs[0])
     dim_order = _get_dimension_order(xr_obj[variable].dims, x_var, y_var, t_var)
     xr_obj.close()
 
@@ -240,7 +223,7 @@ def shp_series(files: list, variable: str, shp_path: str, **kwargs) -> pd.DataFr
     # iterate over each file extracting the value and time for each
     for file in files:
         # open the file
-        xr_obj = _smart_open(file, datatype, xr_kwargs)
+        xr_obj = _smart_open(file, file_type, xr_kwargs)
         ts = xr_obj[t_var].data
 
         # slice the variable's array, returns array with shape corresponding to dimension order and size
@@ -259,13 +242,14 @@ def shp_series(files: list, variable: str, shp_path: str, **kwargs) -> pd.DataFr
 
         # do zonal statistics on everything
         for values_2d in values_array:
-            print(type(values_2d))
-            print(values_2d.ndim)
-            print(affine)
+            # todo test this
+            # print(type(values_2d))
+            # print(values_2d.ndim)
+            # print(affine)
             # actually do the gis to get the value within the shapefile
-            stats = rasterstats.zonal_stats(shp_path, values_2d, affine=affine, nodata=np.nan, stats=stat)
+            stats = rasterstats.zonal_stats(shp_path, values_2d, affine=affine, nodata=np.nan, stats=stat_type)
             # if your shapefile has many polygons, you get many values back. weighted average of those values.
-            tmp = [i[stat] for i in stats if i[stat] is not None]
+            tmp = [i[stat_type] for i in stats if i[stat_type] is not None]
             values.append(sum(tmp) / len(tmp))
 
         # add the timesteps to the list of times
