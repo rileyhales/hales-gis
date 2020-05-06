@@ -13,8 +13,8 @@ __all__ = ['point_series', 'box_series', 'shp_series', 'generate_timejoining_ncm
 
 # TIMESERIES FUNCTIONS
 def point_series(files: list,
-                 variable: str,
-                 coordinates: tuple,
+                 var: str,
+                 coords: tuple,
                  file_type: str = None,
                  x_var: str = 'longitude',
                  y_var: str = 'latitude',
@@ -26,9 +26,9 @@ def point_series(files: list,
 
     Args:
         files: A list of absolute paths to netcdf or gribs files (even if len==1)
-        variable: The name of a variable as it is stored in the file e.g. often 'temp' or 'T' instead of Temperature
-        coordinates: A tuple of the format (x_value, y_value) where the xy values are in units of the x and y
-            coordinate variable
+        var: The name of a variable as it is stored in the file e.g. often 'temp' or 'T' instead of Temperature
+        coords: A tuple (x_value, y_value) where the xy values are the location you want to extract values for
+            in units of the x and y coordinate variable
         file_type: The format of the data in the list of file paths provided by the files argument
         x_var: Name of the x coordinate variable used to spatial reference the array. Default: 'longitude'
         y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'latitude'
@@ -38,21 +38,12 @@ def point_series(files: list,
 
     Returns:
         pandas.DataFrame
-
-    Examples:
-        .. code-block:: python
-
-            data = geomatics.timedata.point_series([list, of, file, paths], 'AirTemp', (10, 20))
     """
-    # get a list of the x&y coordinates using the first file as a reference
-    xr_obj = _smart_open(files[0], file_type, xr_kwargs)
-    x_steps = xr_obj[x_var][:].data
-    y_steps = xr_obj[y_var][:].data
-    # determine the index in the netcdf's coordinates for the xy coordinate provided
-    x_index = (np.abs(x_steps - round(float(coordinates[0]), 2))).argmin()
-    y_index = (np.abs(y_steps - round(float(coordinates[1]), 2))).argmin()
-    dim_order = _get_dimension_order(xr_obj[variable].dims, x_var, y_var, t_var)
-    xr_obj.close()
+    # get information to slice the array with
+    tmp_file = _smart_open(files[0], file_type, xr_kwargs)
+    dim_order = slicing_dimension_order(tmp_file[var].dims, x_var, y_var, t_var)
+    x_idx, y_idx = slicing_indices(tmp_file, var, x_var, y_var, (coords,))
+    tmp_file.close()
 
     # make the return item
     times = []
@@ -65,7 +56,7 @@ def point_series(files: list,
         ts = xr_obj[t_var].data
 
         # extract the correct values from the array and
-        vs = _slice_point(xr_obj[variable], dim_order, x_index, y_index)
+        vs = slice_array_cell(xr_obj[var].data, dim_order, x_idx, y_idx)
         vs[vs == fill_value] = np.nan
 
         # add the results to the lists of values and times depending on the size of the array extracted
@@ -86,12 +77,13 @@ def point_series(files: list,
 
 
 def box_series(files: list,
-               variable: str,
-               coordinates: tuple,
+               var: str,
+               coords: tuple,
                file_type: str = None,
                x_var: str = 'longitude',
                y_var: str = 'latitude',
                t_var: str = 'time',
+               time_from_name: str = None,
                xr_kwargs: dict = {},
                fill_value: int = -9999,
                stat_type: str = 'mean') -> pd.DataFrame:
@@ -100,9 +92,9 @@ def box_series(files: list,
 
     Args:
         files: A list of absolute paths to netcdf or gribs files (even if len==1)
-        variable: The name of a variable as it is stored in the file e.g. often 'temp' or 'T' instead of Temperature
-        coordinates: A tuple of the format (min_x_value, min_y_value, max_x_value, max_y_value) where the xy values are
-            in units of the x and y coordinate variable
+        var: The name of a variable as it is stored in the file e.g. often 'temp' or 'T' instead of Temperature
+        coords: A tuple of the format ((min_x_value, min_y_value), (max_x_value, max_y_value)) where the xy values
+            are in units of the x and y coordinate variable
         file_type: The format of the data in the list of file paths provided by the files argument
         x_var: Name of the x coordinate variable used to spatial reference the array. Default: 'longitude'
         y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'latitude'
@@ -113,28 +105,16 @@ def box_series(files: list,
 
     Returns:
         pandas.DataFrame
-
-    Examples:
-        .. code-block:: python
-
-            data = geomatics.timedata.box_series([list, of, file, paths], 'AirTemp', (10, 20, 15, 25))
     """
-    # get a list of the x&y coordinates using the first file as a reference
-    xr_obj = _smart_open(files[0], file_type, xr_kwargs)
-    x_steps = xr_obj[x_var][:].data
-    y_steps = xr_obj[y_var][:].data
-    # get the indices of the bounding box corners
-    xmin = (np.abs(x_steps - float(coordinates[0]))).argmin()
-    xmax = (np.abs(x_steps - float(coordinates[2]))).argmin()
-    xmin_index = min(xmin, xmax)
-    xmax_index = max(xmin, xmax)
-    ymin = (np.abs(y_steps - float(coordinates[1]))).argmin()
-    ymax = (np.abs(y_steps - float(coordinates[3]))).argmin()
-    ymin_index = min(ymin, ymax)
-    ymax_index = max(ymin, ymax)
-    # which order are the dimensions for this variable
-    dim_order = _get_dimension_order(xr_obj[variable].dims, x_var, y_var, t_var)
-    xr_obj.close()
+    # get information to slice the array with
+    tmp_file = _smart_open(files[0], file_type, xr_kwargs)
+    dim_order = slicing_dimension_order(tmp_file[var].dims, x_var, y_var, t_var)
+    x_1, y_1, x_2, y_2 = slicing_indices(tmp_file, var, x_var, y_var, coords)
+    xmin_idx = min(x_1, x_2)
+    xmax_idx = max(x_1, x_2)
+    ymin_idx = min(y_1, y_2)
+    ymax_idx = max(y_1, y_2)
+    tmp_file.close()
 
     # make the return item
     times = []
@@ -147,7 +127,7 @@ def box_series(files: list,
         ts = xr_obj[t_var].data
 
         # slice the variable's array, returns array with shape corresponding to dimension order and size
-        values_array = _slice_box(xr_obj[variable], dim_order, xmin_index, ymin_index, xmax_index, ymax_index)
+        values_array = slice_array_range(xr_obj[var].data, dim_order, xmin_idx, ymin_idx, xmax_idx, ymax_idx)
         values_array[values_array == fill_value] = np.nan
         if stat_type == 'mean':
             vs = np.mean(values_array)
@@ -213,7 +193,7 @@ def shp_series(files: list,
     nc_xs = xr_obj.variables[x_var][:]
     nc_ys = xr_obj.variables[y_var][:]
     affine = rasterio.transform.from_origin(nc_xs.min(), nc_ys.max(), nc_ys[1] - nc_ys[0], nc_xs[1] - nc_xs[0])
-    dim_order = _get_dimension_order(xr_obj[variable].dims, x_var, y_var, t_var)
+    dim_order = slicing_dimension_order(xr_obj[variable].dims, x_var, y_var, t_var)
     xr_obj.close()
 
     # make the return item
@@ -310,56 +290,21 @@ def generate_timejoining_ncml(files: list, save_dir: str, time_interval: int) ->
     return
 
 
-# MODULE LEVEL AUXILIARY TOOLS
-def _slice_point(xarray_variable, dim_order, x_index, y_index):
-    if dim_order == 'txy':
-        return xarray_variable[:, x_index, y_index].data
-    elif dim_order == 'tyx':
-        return xarray_variable[:, y_index, x_index].data
-
-    elif dim_order == 'xyt':
-        return xarray_variable[x_index, y_index, :].data
-    elif dim_order == 'yxt':
-        return xarray_variable[y_index, x_index, :].data
-
-    elif dim_order == 'xty':
-        return xarray_variable[x_index, :, y_index].data
-    elif dim_order == 'ytx':
-        return xarray_variable[y_index, :, x_index].data
-
-    elif dim_order == 'xy':
-        return xarray_variable[x_index, y_index].data
-    elif dim_order == 'yx':
-        return xarray_variable[y_index, x_index].data
-    else:
-        raise ValueError('Unrecognized order of dimensions, unable to slice array.')
+# FOR GETTING INFORMATION ABOUT THE ORGANIZATION OF THE FILE TO HELP WITH SLICING
+def slicing_indices(xr_obj, x_var, y_var, coord_pairs):
+    # get a list of the x&y coordinates
+    x_steps = xr_obj[x_var][:].data
+    y_steps = xr_obj[y_var][:].data
+    # return all the indices
+    indices = []
+    for coord in coord_pairs:
+        indices.append(((np.abs(x_steps - float(coord[0]))).argmin()))
+        indices.append(((np.abs(y_steps - float(coord[1]))).argmin()))
+    xr_obj.close()
+    return tuple(indices)
 
 
-def _slice_box(xarray_variable, dim_order, xmin_index, ymin_index, xmax_index, ymax_index):
-    if dim_order == 'txy':
-        return xarray_variable[:, xmin_index:xmax_index, ymin_index:ymax_index].data
-    elif dim_order == 'tyx':
-        return xarray_variable[:, ymin_index:ymax_index, xmin_index:xmax_index].data
-
-    elif dim_order == 'xyt':
-        return xarray_variable[xmin_index:xmax_index, ymin_index:ymax_index, :].data
-    elif dim_order == 'yxt':
-        return xarray_variable[ymin_index:ymax_index, xmin_index:xmax_index, :].data
-
-    elif dim_order == 'xty':
-        return xarray_variable[xmin_index:xmax_index, :, ymin_index:ymax_index].data
-    elif dim_order == 'ytx':
-        return xarray_variable[ymin_index:ymax_index, :, xmin_index:xmax_index].data
-
-    elif dim_order == 'xy':
-        return xarray_variable[xmin_index:xmax_index, ymin_index:ymax_index].data
-    elif dim_order == 'yx':
-        return xarray_variable[ymin_index:ymax_index, xmin_index:xmax_index].data
-    else:
-        raise ValueError('Unrecognized order of dimensions, unable to slice array.')
-
-
-def _get_dimension_order(dimensions, x_var, y_var, t_var):
+def slicing_dimension_order(dimensions, x_var, y_var, t_var):
     # check if the variable has 2 dimensions -- should be xy coordinates (spatial references)
     if len(dimensions) == 2:
         if dimensions == (x_var, y_var):
@@ -392,3 +337,51 @@ def _get_dimension_order(dimensions, x_var, y_var, t_var):
             raise ValueError('Unexpected dimension name(s). Specify with the xvar, yvar, tvar keyword arguments')
     else:
         raise ValueError('Your data should have either 2 (x,y) or 3 (x,y,time) dimensions')
+
+
+def slice_array_cell(array, dim_order, x_idx, y_idx):
+    if dim_order == 'txy':
+        return array[:, x_idx, y_idx]
+    elif dim_order == 'tyx':
+        return array[:, y_idx, x_idx]
+
+    elif dim_order == 'xyt':
+        return array[x_idx, y_idx, :]
+    elif dim_order == 'yxt':
+        return array[y_idx, x_idx, :]
+
+    elif dim_order == 'xty':
+        return array[x_idx, :, y_idx]
+    elif dim_order == 'ytx':
+        return array[y_idx, :, x_idx]
+
+    elif dim_order == 'xy':
+        return array[x_idx, y_idx]
+    elif dim_order == 'yx':
+        return array[y_idx, x_idx]
+    else:
+        raise ValueError('Unrecognized order of dimensions, unable to slice array.')
+
+
+def slice_array_range(array, dim_order, xmin_index, ymin_index, xmax_index, ymax_index):
+    if dim_order == 'txy':
+        return array[:, xmin_index:xmax_index, ymin_index:ymax_index]
+    elif dim_order == 'tyx':
+        return array[:, ymin_index:ymax_index, xmin_index:xmax_index]
+
+    elif dim_order == 'xyt':
+        return array[xmin_index:xmax_index, ymin_index:ymax_index, :]
+    elif dim_order == 'yxt':
+        return array[ymin_index:ymax_index, xmin_index:xmax_index, :]
+
+    elif dim_order == 'xty':
+        return array[xmin_index:xmax_index, :, ymin_index:ymax_index]
+    elif dim_order == 'ytx':
+        return array[ymin_index:ymax_index, :, xmin_index:xmax_index]
+
+    elif dim_order == 'xy':
+        return array[xmin_index:xmax_index, ymin_index:ymax_index]
+    elif dim_order == 'yx':
+        return array[ymin_index:ymax_index, xmin_index:xmax_index]
+    else:
+        raise ValueError('Unrecognized order of dimensions, unable to slice array.')
