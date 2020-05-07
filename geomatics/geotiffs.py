@@ -18,8 +18,7 @@ def upsample(files: list, scale: float) -> list:
         scale: A positive integer used as the multiplying factor to increase the resolution.
 
     Returns:
-        1. A list of paths to the geotiff files created
-        2. A rasterio affine transformation used on the geotransform
+        list of paths to the geotiff files created
     """
     # Read raster dimensions
     raster_dim = rasterio.open(files[0])

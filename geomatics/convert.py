@@ -6,7 +6,7 @@ import pygrib
 import rasterio
 import shapefile
 
-from .prj import affine_trans_from_netcdf_file, affine_trans_from_grib_file
+from .prj import affine_from_netcdf, affine_from_grib
 
 __all__ = ['geojson_to_shapefile', 'netcdf_to_geotiff', 'grib_to_geotiff']
 
@@ -18,9 +18,6 @@ def geojson_to_shapefile(geojson: dict, savepath: str) -> None:
     Args:
         geojson: a valid geojson as a dictionary or json python object. try json.loads for strings
         savepath: the full file path to save the shapefile to, including the file_name.shp
-
-    Returns:
-        None
     """
     # create the shapefile
     fileobject = shapefile.Writer(target=savepath, shpType=shapefile.POLYGON, autoBalance=True)
@@ -87,7 +84,7 @@ def netcdf_to_geotiff(files: list,
         A list of paths to the geotiff files created
     """
     # determine the affine transformation
-    affine = affine_trans_from_netcdf_file(files[0], variable, x_var, y_var)
+    affine = affine_from_netcdf(files[0], variable, x_var, y_var)
 
     # A list of all the files that get written which can be returned
     output_files = []
@@ -139,7 +136,7 @@ def grib_to_geotiff(files: list,
 
     Args:
         files: A list of absolute paths to the appropriate type of files (even if len==1)
-        band_number: # todo
+        band_number: the band number that the array of interest is located on
         save_dir: The directory to store the geotiffs to. Default: directory containing the gribs.
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
         delete_sources: Allows you to delete the source gribs as they are converted. Default: False
@@ -150,7 +147,7 @@ def grib_to_geotiff(files: list,
         A list of paths to the geotiff files created
     """
     # determine the affine transformation
-    affine = affine_trans_from_grib_file(files[0])
+    affine = affine_from_grib(files[0])
 
     # A list of all the files that get written which can be returned
     output_files = []

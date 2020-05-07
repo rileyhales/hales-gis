@@ -13,5 +13,5 @@ Download Tools
 Overview Utilities
 ~~~~~~~~~~~~~~~~~~
 .. automodule:: geomatics.data
-	:members: inspect_netcdf, inspect_grib
+	:members: inspect_netcdf, inspect_grib, inspect_hdf5, detect_type
 	:noindex:

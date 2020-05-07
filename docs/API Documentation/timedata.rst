@@ -17,3 +17,11 @@ A tool for creating a netCDF Markup Language (NCML) file based on the absolute f
 .. automodule:: geomatics.timedata
 	:members: generate_timejoining_ncml
 	:noindex:
+
+Array Slicing Help
+~~~~~~~~~~~~~~~~~~
+Functions that help determine how to slice arrays with arbitrary sizes and numbers of dimensions
+
+.. automodule:: geomatics.timedata
+	:members: get_slicing_info
+	:noindex:

@@ -3,9 +3,11 @@ API Documentation
 *****************
 
 .. toctree::
-   :maxdepth: 3
+	:maxdepth: 3
 
-   convert
-   data
-   geotiffs
-   timedata
+	faq
+	convert
+	data
+	geotiffs
+	prj
+	timedata

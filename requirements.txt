@@ -8,3 +8,4 @@ pandas
 requests
 pyshp
 xarray
+h5py

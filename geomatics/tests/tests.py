@@ -1,3 +1,5 @@
+import glob
+
 import geomatics
 
 # if __name__ == '__main__':
@@ -21,9 +23,17 @@ import geomatics
 #     # test the conversions to geotiff
 #     print(geomatics.convert.make_affine_transform(gfs_files[0]))
 #     os.removedirs(tmpdir)
-
 # files = glob.glob('/Users/rileyhales/SpatialData/THREDDS/gldas/raw/*2019*.nc4')
 # geomatics.convert.netcdf_to_geotiff(files, 'Tair_f_inst', save_dir='/Users/riley/spatialdata/', x_var='lat', y_var='lon')
 # print(geomatics.timedata.point_series(files, 'Tair_f_inst', (10, 20), x_var='lat', y_var='lon'))
-gfs_files = geomatics.data.download_noaa_gfs('/Users/rileyhales/SpatialData', 1)
-print(gfs_files)
+# gfs_files = geomatics.data.download_noaa_gfs('/Users/rileyhales/SpatialData', 1)
+# print(gfs_files)
+path = glob.glob('/Users/riley/spatialdata/smap/*.h5')
+print(geomatics.timedata.point_series(
+    path,
+    'Soil_Moisture_Retrieval_Data_1km/soil_moisture_1km',
+    coords=(-112, 41),
+    x_var='Soil_Moisture_Retrieval_Data_1km/latitude_1km',
+    y_var='Soil_Moisture_Retrieval_Data_1km/longitude_1km',
+    t_var='a/rangeBeginningDateTime',
+))

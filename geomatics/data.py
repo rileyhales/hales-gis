@@ -2,13 +2,15 @@ import datetime
 import json
 import os
 
+import h5py
 import netCDF4 as nc
+import numpy as np
 import pygrib
 import requests
 import xarray as xr
 
-__all__ = ['download_noaa_gfs', 'get_livingatlas_geojson', 'inspect_netcdf', 'inspect_grib', 'detect_type',
-           '_smart_open']
+__all__ = ['download_noaa_gfs', 'get_livingatlas_geojson', 'inspect_netcdf', 'inspect_grib', 'inspect_hdf5',
+           'detect_type', '_smart_open', '_get_array']
 
 
 def download_noaa_gfs(save_path: str, steps: int) -> list:
@@ -201,25 +203,66 @@ def inspect_grib(path: str, band_number: int = 0) -> None:
     return
 
 
+def inspect_hdf5(path: str) -> None:
+    """
+    Prints a summary of all the groups and variables contained in an HDF5 file
+
+    Args:
+        path: the path to an hdf5 file
+    """
+    ds = h5py.File(path)
+    print('The following groups/variables are contained in this HDF5 file')
+    ds.visit(print)
+    return
+
+
 def detect_type(path: str) -> str:
+    """
+    Tries to guess the file format of a file based on the suffix of the file
+
+    Args:
+        path: the path to a data file
+
+    Returns:
+        str either 'netcdf', 'grib', 'geotiff', or 'hdf5'
+    """
     if path.endswith('.nc') or path.endswith('.nc4'):
         return 'netcdf'
     elif path.endswith('.grb') or path.endswith('.grib'):
         return 'grib'
     elif path.endswith('.gtiff') or path.endswith('.tiff') or path.endswith('tif'):
         return 'geotiff'
+    elif path.endswith('.h5') or path.endswith('.hd5') or path.endswith('.hdf5'):
+        return 'hdf5'
     else:
         raise ValueError('Unconfigured filter type')
 
 
-def _smart_open(path: str, filetype: str = None, backend_kwargs: dict = None):
-    if filetype is None:
-        filetype = detect_type(path)
+def _smart_open(path: str, file_type: str = None, backend_kwargs: dict = None) -> np.array:
+    if file_type is None:
+        file_type = detect_type(path)
     if backend_kwargs is None:
         backend_kwargs = dict()
-    if filetype in 'netcdf':
+    if file_type == 'netcdf':
         return xr.open_dataset(path)
-    elif filetype == 'grib':
+    elif file_type == 'grib':
         return xr.open_dataset(path, engine='cfgrib', backend_kwargs=backend_kwargs)
+    elif file_type == 'hdf5':
+        return h5py.File(path, 'r')
+    else:
+        raise ValueError('Unsupported file type')
+
+
+def _get_array(open_file, file_type: str, var: str):
+    if file_type == 'netcdf':
+        return open_file[var].data
+    elif file_type == 'grib':
+        return open_file[var].data
+    elif file_type == 'hdf5':
+        vars = var.split('/')
+        for v in vars:
+            open_file = open_file[v]
+        # not using open_file[:] because [:] can't slice string data but ... catches it all
+        return open_file[...]
     else:
         raise ValueError('unsupported file type')

@@ -44,6 +44,7 @@ autodoc_mock_imports = [
     'shapefile',
     'pyproj',
     'xarray',
+    'h5py'
 ]
 
 # Add any paths that contain templates here, relative to this directory.
