@@ -1,13 +1,12 @@
-import datetime
 import os
 
 import netCDF4 as nc
 import numpy as np
 import pandas as pd
-import rasterio
 import rasterstats
 
 from .data import detect_type, _smart_open, _get_array
+from .prj import affine_from_netcdf, affine_from_grib, affine_from_hdf5
 
 __all__ = ['point_series', 'box_series', 'shp_series', 'generate_timejoining_ncml', 'get_slicing_info',
            'slice_array_cell', 'slice_array_range']
@@ -21,7 +20,6 @@ def point_series(files: list,
                  x_var: str = 'longitude',
                  y_var: str = 'latitude',
                  t_var: str = 'time',
-                 time_from_name: str = None,
                  h5_group: str = None,
                  xr_kwargs: dict = None,
                  fill_value: int = -9999) -> pd.DataFrame:
@@ -37,7 +35,6 @@ def point_series(files: list,
         x_var: Name of the x coordinate variable used to spatial reference the array. Default: 'longitude'
         y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'latitude'
         t_var: Name of the time coordinate variable used for time referencing the data. Default: 'time'
-        time_from_name: a string used by datetime.strptime to get a datetime object from the name of the file
         h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
         xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
@@ -54,8 +51,8 @@ def point_series(files: list,
     # get information to slice the array with
     slicing_info = get_slicing_info(files[0], file_type, xr_kwargs, var, x_var, y_var, t_var, (coords,))
     dim_order = slicing_info['dim_order']
-    x_idx = slicing_info['indices'][0]
-    y_idx = slicing_info['indices'][1]
+    x_idx = slicing_info['indices'][0][0]
+    y_idx = slicing_info['indices'][0][1]
 
     # make the return item
     times = []
@@ -71,16 +68,12 @@ def point_series(files: list,
         # open the file
         opened_file = _smart_open(file, ft, xr_kwargs)
 
-        # handle the times for the file
-        if time_from_name:
-            ts.append(datetime.datetime.strptime(file, time_from_name))
+        ts = _get_array(opened_file, ft, t_var)
+        if ts.ndim == 0:
+            times.append(ts)
         else:
-            ts = _get_array(opened_file, ft, t_var)
-            if ts.ndim == 0:
-                times.append(ts)
-            else:
-                for t in ts:
-                    times.append(t)
+            for t in ts:
+                times.append(t)
 
         # extract the appropriate values from the variable
         vs = slice_array_cell(_get_array(opened_file, ft, var), dim_order, x_idx, y_idx)
@@ -106,7 +99,6 @@ def box_series(files: list,
                x_var: str = 'longitude',
                y_var: str = 'latitude',
                t_var: str = 'time',
-               time_from_name: str = None,
                h5_group: str = None,
                xr_kwargs: dict = None,
                fill_value: int = -9999,
@@ -123,7 +115,6 @@ def box_series(files: list,
         x_var: Name of the x coordinate variable used to spatial reference the array. Default: 'longitude'
         y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'latitude'
         t_var: Name of the time coordinate variable used for time referencing the data. Default: 'time'
-        time_from_name: a string used by datetime.strptime to get a datetime object from the name of the file
         h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
         xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
@@ -139,7 +130,7 @@ def box_series(files: list,
         t_var = f'{h5_group}/{t_var}'
 
     # get information to slice the array with
-    slicing_info = get_slicing_info(files[0], file_type, xr_kwargs, var, x_var, y_var, t_var, (coords,))
+    slicing_info = get_slicing_info(files[0], file_type, xr_kwargs, var, x_var, y_var, t_var, coords)
     dim_order = slicing_info['dim_order']
     xmin_idx = min(slicing_info['indices'][0][0], slicing_info['indices'][1][0])
     xmax_idx = max(slicing_info['indices'][0][0], slicing_info['indices'][1][0])
@@ -160,16 +151,12 @@ def box_series(files: list,
         # open the file
         opened_file = _smart_open(file, ft, xr_kwargs)
 
-        # handle the times for the file
-        if time_from_name:
-            ts.append(datetime.datetime.strptime(file, time_from_name))
+        ts = _get_array(opened_file, ft, t_var)
+        if ts.ndim == 0:
+            times.append(ts)
         else:
-            ts = _get_array(opened_file, ft, t_var)
-            if ts.ndim == 0:
-                times.append(ts)
-            else:
-                for t in ts:
-                    times.append(t)
+            for t in ts:
+                times.append(t)
 
         # slice the variable's array, returns array with shape corresponding to dimension order and size
         vs = slice_array_range(_get_array(opened_file, ft, var), dim_order, xmin_idx, ymin_idx, xmax_idx, ymax_idx)
@@ -200,7 +187,6 @@ def box_series(files: list,
     return pd.DataFrame(np.transpose(np.asarray([times, values])), columns=['times', 'values'])
 
 
-# todo finish shape series
 def shp_series(files: list,
                var: str,
                shp_path: str,
@@ -208,7 +194,6 @@ def shp_series(files: list,
                x_var: str = 'longitude',
                y_var: str = 'latitude',
                t_var: str = 'time',
-               time_from_name: str = None,
                h5_group: str = None,
                xr_kwargs: dict = None,
                fill_value: int = -9999,
@@ -224,7 +209,6 @@ def shp_series(files: list,
         x_var: Name of the x coordinate variable used to spatial reference the array. Default: 'longitude'
         y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'latitude'
         t_var: Name of the time coordinate variable used for time referencing the data. Default: 'time'
-        time_from_name: a string used by datetime.strptime to get a datetime object from the name of the file
         h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
         xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
@@ -238,11 +222,27 @@ def shp_series(files: list,
 
             data = geomatics.timedata.shp_series([list, of, file, paths], 'AirTemp', '/path/to/shapefile.shp')
     """
+    if h5_group:
+        var = f'{h5_group}/{var}'
+        x_var = f'{h5_group}/{x_var}'
+        y_var = f'{h5_group}/{y_var}'
+        t_var = f'{h5_group}/{t_var}'
+
+    if file_type is None:
+        file_type = detect_type(files[0])
+
     # get information to slice the array with
-    slicing_info = get_slicing_info(files[0], file_type, xr_kwargs, var, x_var, y_var, t_var, (coords,))
-    dim_order = slicing_info['dim_order']
+    slicing_info = get_slicing_info(files[0], file_type, xr_kwargs, var, x_var, y_var, t_var, None)['dim_order']
+    dim_order = slicing_info
     # get a list of the x&y coordinates using the first file as a reference
-    affine = rasterio.transform.from_origin(nc_xs.min(), nc_ys.max(), nc_ys[1] - nc_ys[0], nc_xs[1] - nc_xs[0])
+    if file_type == 'netcdf':
+        affine = affine_from_netcdf(files[0], var, x_var, y_var, xr_kwargs)
+    elif file_type == 'grib':
+        affine = affine_from_grib(files[0], var, x_var, y_var, xr_kwargs)
+    elif file_type == 'hdf5':
+        affine = affine_from_hdf5(files[0], x_var, y_var, None)
+    else:
+        raise ValueError(f'Unexpected file type {file_type}')
 
     # make the return item
     times = []
@@ -250,40 +250,41 @@ def shp_series(files: list,
 
     # iterate over each file extracting the value and time for each
     for file in files:
+        if file_type is None:
+            ft = detect_type(file)
+        else:
+            ft = file_type
+
         # open the file
-        xr_obj = _smart_open(file, file_type, xr_kwargs)
-        ts = xr_obj[t_var].data
-
-        # slice the variable's array, returns array with shape corresponding to dimension order and size
-        values_array = xr_obj[var][:].data
-        # drop fill and no data entries
-        values_array[values_array == fill_value] = np.nan
-
-        # modify the array as necessary
-        if values_array.ndim == 2:
-            # if the values are in a 2D array, cushion it with a 3rd dimension so you can iterate
-            values_array = np.reshape(values_array, [1] + list(np.shape(values_array)))
-            dim_order = 't' + dim_order
-        if 't' in dim_order:
-            # roll axis brings the time dimension to the front so we can iterate over it
-            values_array = np.rollaxis(values_array, dim_order.index('t'))
-
-        # do zonal statistics on everything
-        for values_2d in values_array:
-            # actually do the gis to get the value within the shapefile
-            stats = rasterstats.zonal_stats(shp_path, values_2d, affine=affine, nodata=np.nan, stats=stat_type)
-            # if your shapefile has many polygons, you get many values back. weighted average of those values.
-            tmp = [i[stat_type] for i in stats if i[stat_type] is not None]
-            values.append(sum(tmp) / len(tmp))
-
-        # add the timesteps to the list of times
+        opened_file = _smart_open(file, file_type, xr_kwargs)
+        ts = _get_array(opened_file, ft, t_var)
         if ts.ndim == 0:
             times.append(ts)
         else:
             for t in ts:
                 times.append(t)
 
-        xr_obj.close()
+        # slice the variable's array, returns array with shape corresponding to dimension order and size
+        vs = _get_array(opened_file, ft, var)
+        vs[vs == fill_value] = np.nan
+        # modify the array as necessary
+        if vs.ndim == 2:
+            # if the values are in a 2D array, cushion it with a 3rd dimension so you can iterate
+            vs = np.reshape(vs, [1] + list(np.shape(vs)))
+            dim_order = 't' + dim_order
+        if 't' in dim_order:
+            # roll axis brings the time dimension to the front so we can iterate over it -- may not work as expected
+            vs = np.rollaxis(vs, dim_order.index('t'))
+
+        # do zonal statistics on everything
+        for values_2d in vs:
+            # actually do the gis to get the value within the shapefile
+            stats = rasterstats.zonal_stats(shp_path, values_2d, affine=affine, nodata=np.nan, stats=stat_type)
+            # if your shapefile has many polygons, you get many values back. weighted average of those values.
+            tmp = [i[stat_type] for i in stats if i[stat_type] is not None]
+            values.append(sum(tmp) / len(tmp))
+
+        opened_file.close()
 
     # return the data stored in a dataframe
     return pd.DataFrame(np.transpose(np.asarray([times, values])), columns=['times', 'values'])
@@ -374,13 +375,7 @@ def get_slicing_info(path, file_type, xr_kwargs, var, x_var, y_var, t_var, coord
     assert x_steps.ndim == 1
     assert y_steps.ndim == 1
 
-    # gather all the indices
-    indices = []
-    for coord in coord_pairs:
-        indices.append((np.abs(x_steps - float(coord[0]))).argmin())
-        indices.append((np.abs(y_steps - float(coord[1]))).argmin())
-
-    # if its a netcdf or grib, the dimensions should be included
+    # if its a netcdf or grib, the dimensions should be included by xarray
     if file_type == 'netcdf' or file_type == 'grib':
         dims = list(tmp_file[var].dims)
         for i, dim in enumerate(dims):
@@ -403,6 +398,14 @@ def get_slicing_info(path, file_type, xr_kwargs, var, x_var, y_var, t_var, coord
         dims = False
 
     tmp_file.close()
+
+    if coord_pairs is None:
+        return dict(dim_order=dims, file_type=file_type)
+
+    # gather all the indices
+    indices = []
+    for coord in coord_pairs:
+        indices.append(((np.abs(x_steps - float(coord[0]))).argmin(), (np.abs(y_steps - float(coord[1]))).argmin()), )
 
     return dict(indices=indices, dim_order=dims, file_type=file_type)
 

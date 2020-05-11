@@ -1,6 +1,6 @@
-=======
+*******
 convert
-=======
+*******
 
 Methods for converting formats of common spatial data
 

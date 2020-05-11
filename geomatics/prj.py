@@ -48,7 +48,8 @@ def georeferenced_grid_info(file: str,
 def affine_from_netcdf(file: str,
                        var: str,
                        x_var: str = 'longitude',
-                       y_var: str = 'latitude') -> rasterio.transform.from_bounds:
+                       y_var: str = 'latitude',
+                       xr_kwargs: dict = None) -> rasterio.transform.from_bounds:
     """
     Creates an affine transform from the dimensions of the coordinate variable data in a netCDF file
 
@@ -57,13 +58,12 @@ def affine_from_netcdf(file: str,
         var: The name of a variable as it is stored in the data file e.g. 'temp' instead of Temperature
         x_var: Name of the x coordinate variable used to spatial reference the array. Default: 'lon' (longitude)
         y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'lat' (latitude)
+        xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
 
     Returns:
         rasterio.transform.from_bounds
     """
-    # open the file
-    raster = _smart_open(file, file_type='netcdf')
-
+    raster = _smart_open(file, file_type='netcdf', backend_kwargs=xr_kwargs)
     lon = raster.variables[x_var][:]
     lat = raster.variables[y_var][:]
     lon_min = lon.min()
@@ -73,29 +73,35 @@ def affine_from_netcdf(file: str,
     data = raster[var].values
     height = data.shape[0]
     width = data.shape[1]
-
     raster.close()
-
     return rasterio.transform.from_bounds(lon_min, lat_min, lon_max, lat_max, width, height)
 
 
-def affine_from_grib(file: str) -> rasterio.transform.from_bounds:
+def affine_from_grib(file: str,
+                     var: str,
+                     x_var: str = 'longitude',
+                     y_var: str = 'latitude',
+                     xr_kwargs: dict = None) -> rasterio.transform.from_bounds:
     """
     Creates an affine transform from the dimensions of the coordinate variable data in a Grib file
 
     Args:
         file: An absolute paths to the data file
+        xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
 
     Returns:
         rasterio.transform.from_bounds
     """
-    raster = _smart_open(file, file_type='grib')
-    width = raster.width
-    height = raster.height
-    lon_min = raster.bounds.left
-    lon_max = raster.bounds.right
-    lat_min = raster.bounds.bottom
-    lat_max = raster.bounds.top
+    raster = _smart_open(file, file_type='grib', backend_kwargs=xr_kwargs)
+    lon = raster.variables[x_var][:]
+    lat = raster.variables[y_var][:]
+    lon_min = lon.min()
+    lon_max = lon.max()
+    lat_min = lat.min()
+    lat_max = lat.max()
+    data = raster[var].values
+    height = data.shape[0]
+    width = data.shape[1]
     raster.close()
     return rasterio.transform.from_bounds(lon_min, lat_min, lon_max, lat_max, width, height)
 

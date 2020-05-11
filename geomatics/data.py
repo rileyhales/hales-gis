@@ -20,6 +20,8 @@ def download_noaa_gfs(save_path: str, steps: int) -> list:
     YYYYMMDDHH time format. E.G a file named gfs_2020010100_2020010512.grb means that the file contains data from the
     forecast created Jan 1 2020 at 00:00:00 for the time Jan 5 2020 at 12PM.
 
+    Files size is typically around 350 Mb per time step.
+
     Args:
         save_path: an absolute file path to the directory where you want to save the gfs files
         steps: the number of 6 hour forecast steps to download. E.g. 4 steps = 1 day
@@ -235,7 +237,7 @@ def detect_type(path: str) -> str:
     elif path.endswith('.h5') or path.endswith('.hd5') or path.endswith('.hdf5'):
         return 'hdf5'
     else:
-        raise ValueError('Unconfigured filter type')
+        raise ValueError('File does not match known patterns. Specify file_type or use a standard file extensions')
 
 
 def _smart_open(path: str, file_type: str = None, backend_kwargs: dict = None) -> np.array:
@@ -244,7 +246,7 @@ def _smart_open(path: str, file_type: str = None, backend_kwargs: dict = None) -
     if backend_kwargs is None:
         backend_kwargs = dict()
     if file_type == 'netcdf':
-        return xr.open_dataset(path)
+        return xr.open_dataset(path, backend_kwargs=backend_kwargs)
     elif file_type == 'grib':
         return xr.open_dataset(path, engine='cfgrib', backend_kwargs=backend_kwargs)
     elif file_type == 'hdf5':

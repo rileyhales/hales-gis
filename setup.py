@@ -31,9 +31,3 @@ setup(
     ],
     install_requires=install_requires
 )
-
-# todo write and run tests on everything
-# todo add notes in docs about default variable names, backend kwargs for gfs gribs, etc
-# todo change filetype parameter to use checking for isinstance(xarray or h5 datasets)
-# todo pass the hdf5_group param to downstream functions rather than alter var, can ruin setting dim order, indices, etc
-# todo make the prj georeferencing info work on hdf5
