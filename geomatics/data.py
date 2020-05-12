@@ -2,15 +2,17 @@ import datetime
 import json
 import os
 
+import affine
 import h5py
 import netCDF4 as nc
-import numpy as np
 import pygrib
 import requests
 import xarray as xr
 
-__all__ = ['download_noaa_gfs', 'get_livingatlas_geojson', 'inspect_netcdf', 'inspect_grib', 'inspect_hdf5',
-           'detect_type', '_smart_open', '_get_array']
+from ._utils import open_by_engine
+
+__all__ = ['download_noaa_gfs', 'get_livingatlas_geojson', 'summarize_georeferencing', 'recommend_engine', 'summarize',
+           'gen_affine']
 
 
 def download_noaa_gfs(save_path: str, steps: int) -> list:
@@ -139,13 +141,95 @@ def get_livingatlas_geojson(location: str) -> dict:
     return json.loads(req.text)
 
 
-def inspect_netcdf(path: str) -> None:
+def summarize_georeferencing(file: str,
+                             engine: str = None,
+                             x_var: str = 'lon',
+                             y_var: str = 'lat',
+                             xr_kwargs: dict = None) -> dict:
+    """
+    Determines the information needed to create an affine transformation for a geo-referenced data array.
+
+    Args:
+        file: the absolute path to a netcdf or grib file
+        file_type: The format of the data in the list of file paths provided by the files argument
+        x_var: Name of the x coordinate variable used to spatial reference the array. Default: 'lon' (longitude)
+        y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'lat' (latitude)
+        xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
+
+    Returns:
+        A dictionary containing the information needed to create the affine transformation of a dataset.
+    """
+    # open the file to be read
+    ds = open_by_engine(file, engine, xr_kwargs)
+    x_data = ds[x_var].values
+    y_data = ds[y_var].values
+
+    return {
+        'x_first_val': x_data[0],
+        'x_last_val': x_data[-1],
+        'x_min': x_data.min(),
+        'x_max': x_data.max(),
+        'x_num_values': x_data.size,
+        'x_resolution': x_data[1] - x_data[0],
+
+        'y_first_val': y_data[0],
+        'y_last_val': y_data[-1],
+        'y_min': y_data.min(),
+        'y_max': y_data.max(),
+        'y_num_values': y_data.size,
+        'y_resolution': y_data[1] - y_data[0]
+    }
+
+
+def recommend_engine(path: str) -> str:
+    """
+    Tries to guess the file format of a file based on the suffix of the file
+
+    Args:
+        path: the path to a data file
+
+    Returns:
+        str either 'netcdf', 'grib', 'geotiff', or 'hdf5'
+    """
+    # todo finish, print i think your file is a {file_type} which performs best with the {engine} engine
+    if path.endswith('.nc') or path.endswith('.nc4'):
+        return 'netcdf'
+    elif path.endswith('.grb') or path.endswith('.grib'):
+        return 'grib'
+    elif path.endswith('.gtiff') or path.endswith('.tiff') or path.endswith('tif'):
+        return 'geotiff'
+    elif path.endswith('.h5') or path.endswith('.hd5') or path.endswith('.hdf5'):
+        return 'hdf5'
+    else:
+        raise ValueError('File does not match known patterns. Specify file_type or use a standard file extensions')
+
+
+def summarize(path: str, band_number: int = 0) -> None:
     """
     Prints lots of messages showing information about variables, dimensions, and metadata
 
     Args:
-        path: The path to a single netcdf file.
+        path: The path to a netcdf file.
+        band_number: (optional) An integer corresponding to the band number you want more information for
     """
+    # todo
+    grib = pygrib.open(path)
+    grib.seek(0)
+    print('This is a summary of all the information in your grib file')
+    print(grib.read())
+
+    if band_number:
+        print()
+        print('The keys for this variable are:')
+        print(grib[band_number].keys())
+        print()
+        print('The data stored in this variable are:')
+        print(grib[band_number].values)
+
+    ds = h5py.File(path)
+    print('The following groups/variables are contained in this HDF5 file')
+    ds.visit(print)
+
     nc_obj = nc.Dataset(path, 'r', clobber=False, diskless=True, persist=False)
 
     print("This is your netCDF python object")
@@ -178,93 +262,54 @@ def inspect_netcdf(path: str) -> None:
         print(nc_obj.dimensions[dimension].size)  # print the size of a dimension
 
     nc_obj.close()  # close the file connection to the file
-    return
 
-
-def inspect_grib(path: str, band_number: int = 0) -> None:
-    """
-    Prints lots of messages showing information about variables, dimensions, and metadata
-
-    Args:
-        path: The path to a netcdf file.
-        band_number: (optional) An integer corresponding to the band number you want more information for
-    """
-    grib = pygrib.open(path)
-    grib.seek(0)
-    print('This is a summary of all the information in your grib file')
-    print(grib.read())
-
-    if band_number:
-        print()
-        print('The keys for this variable are:')
-        print(grib[band_number].keys())
-        print()
-        print('The data stored in this variable are:')
-        print(grib[band_number].values)
+    print(xr.open_rasterio(path))
 
     return
 
 
-def inspect_hdf5(path: str) -> None:
+def gen_affine(path: str,
+               engine: str = None,
+               x_var: str = 'lon',
+               y_var: str = 'lat',
+               xr_kwargs: dict = None,
+               h5_group: str = None) -> affine.Affine:
     """
-    Prints a summary of all the groups and variables contained in an HDF5 file
+    Creates an affine transform from the dimensions of the coordinate variable data in a netCDF file
 
     Args:
-        path: the path to an hdf5 file
-    """
-    ds = h5py.File(path)
-    print('The following groups/variables are contained in this HDF5 file')
-    ds.visit(print)
-    return
-
-
-def detect_type(path: str) -> str:
-    """
-    Tries to guess the file format of a file based on the suffix of the file
-
-    Args:
-        path: the path to a data file
+        path: An absolute paths to the data file
+        x_var: Name of the x coordinate variable used to spatial reference the array. Default: 'lon' (lon)
+        y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'lat' (lat)
 
     Returns:
-        str either 'netcdf', 'grib', 'geotiff', or 'hdf5'
+        tuple(affine.Affine, width: int, height: int)
     """
-    if path.endswith('.nc') or path.endswith('.nc4'):
-        return 'netcdf'
-    elif path.endswith('.grb') or path.endswith('.grib'):
-        return 'grib'
-    elif path.endswith('.gtiff') or path.endswith('.tiff') or path.endswith('tif'):
-        return 'geotiff'
-    elif path.endswith('.h5') or path.endswith('.hd5') or path.endswith('.hdf5'):
-        return 'hdf5'
+    raster = open_by_engine(path, engine, xr_kwargs)
+    if engine in ('xarray', 'cfgrib', 'netcdf4', 'rasterio'):
+        lon = raster.variables[x_var][:]
+        lat = raster.variables[y_var][:]
+    elif engine == 'h5py':
+        if h5_group:
+            raster = raster[h5_group]
+        lon = raster[x_var][:]
+        lat = raster[y_var][:]
+    # todo finish engines
+    # elif engine == 'pygrib':
+    #     return pygrib.open(path)
+    # elif engine in ('PIL', 'pillow'):
+    #     return Image
     else:
-        raise ValueError('File does not match known patterns. Specify file_type or use a standard file extensions')
+        raise ValueError(f'Unsupported engine: {engine}')
 
-
-def _smart_open(path: str, file_type: str = None, backend_kwargs: dict = None) -> np.array:
-    if file_type is None:
-        file_type = detect_type(path)
-    if backend_kwargs is None:
-        backend_kwargs = dict()
-    if file_type == 'netcdf':
-        return xr.open_dataset(path, backend_kwargs=backend_kwargs)
-    elif file_type == 'grib':
-        return xr.open_dataset(path, engine='cfgrib', backend_kwargs=backend_kwargs)
-    elif file_type == 'hdf5':
-        return h5py.File(path, 'r')
+    if lat.ndim == 2:
+        height = len(lat[:, 0])
     else:
-        raise ValueError('Unsupported file type')
-
-
-def _get_array(open_file, file_type: str, var: str):
-    if file_type == 'netcdf':
-        return open_file[var].data
-    elif file_type == 'grib':
-        return open_file[var].data
-    elif file_type == 'hdf5':
-        vars = var.split('/')
-        for v in vars:
-            open_file = open_file[v]
-        # not using open_file[:] because [:] can't slice string data but ... catches it all
-        return open_file[...]
+        height = len(lat)
+    if lon.ndim == 2:
+        width = len(lon[0, :])
     else:
-        raise ValueError('unsupported file type')
+        width = len(lon)
+
+    raster.close()
+    return affine.Affine(lon[1] - lon[0], 0, lon.min(), 0, lat[0] - lat[1], lat.max())

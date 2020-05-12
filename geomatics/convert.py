@@ -1,14 +1,14 @@
 import os
 
-import netCDF4 as nc
+import affine
 import numpy as np
-import pygrib
 import rasterio
 import shapefile
+import xarray as xr
 
-from .prj import affine_from_netcdf, affine_from_grib
+from .data import gen_affine
 
-__all__ = ['geojson_to_shapefile', 'netcdf_to_geotiff', 'grib_to_geotiff']
+__all__ = ['geojson_to_shapefile', 'to_geotiff', 'upsample_geotiff']
 
 
 def geojson_to_shapefile(geojson: dict, savepath: str) -> None:
@@ -58,24 +58,26 @@ def geojson_to_shapefile(geojson: dict, savepath: str) -> None:
     return
 
 
-def netcdf_to_geotiff(files: list,
-                      variable: str,
-                      crs: str = 'EPSG:4326',
-                      x_var: str = 'longitude',
-                      y_var: str = 'latitude',
-                      fill_value: int = -9999,
-                      save_dir: str = False,
-                      delete_sources: bool = False) -> list:
+def to_geotiff(files: list,
+               variable: str,
+               aff: affine.Affine = None,
+               crs: str = 'EPSG:4326',
+               x_var: str = 'lon',
+               y_var: str = 'lat',
+               fill_value: int = -9999,
+               save_dir: str = False,
+               delete_sources: bool = False) -> list:
     """
-    Converts the array of data for a certain variable in a netcdf file to a geotiff.
+    Converts the array of data for a certain variable in a grib file to a geotiff.
 
     Args:
         files: A list of absolute paths to the appropriate type of files (even if len==1)
         variable: The name of a variable as it is stored in the netcdf e.g. 'temp' instead of Temperature
+        aff: an affine.Affine transformation for the data if you already know what it is
         crs: Coordinate Reference System used by rasterio.open(). An EPSG ID string such as 'EPSG:4326' or
             '+proj=latlong'
-        x_var: Name of the x coordinate variable used to spatial reference the netcdf array. Default: 'longitude'
-        y_var: Name of the y coordinate variable used to spatial reference the netcdf array. Default: 'latitude'
+        x_var: Name of the x coordinate variable used to spatial reference the netcdf array. Default: 'lon'
+        y_var: Name of the y coordinate variable used to spatial reference the netcdf array. Default: 'lat'
         save_dir: The directory to store the geotiffs to. Default: directory containing the netcdfs.
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
         delete_sources: Allows you to delete the source netcdfs as they are converted. Default: False
@@ -83,8 +85,8 @@ def netcdf_to_geotiff(files: list,
     Returns:
         A list of paths to the geotiff files created
     """
-    # determine the affine transformation
-    affine = affine_from_netcdf(files[0], variable, x_var, y_var)
+    if aff is None:
+        aff = gen_affine(files[0], x_var, y_var)
 
     # A list of all the files that get written which can be returned
     output_files = []
@@ -96,12 +98,13 @@ def netcdf_to_geotiff(files: list,
         output_files.append(save_path)
 
         # open the netcdf and get the data array
-        nc_obj = nc.Dataset(file, 'r')
-        array = np.asarray(nc_obj[variable][:])
-        array = array[0]
+        # todo this needs to be updated
+        file_obj = xr.open_dataset(file, 'r')
+        array = np.asarray(file_obj[variable][:])
+        array = np.squeeze(array)
         array[array == fill_value] = np.nan  # If you have fill values, change the comparator to git rid of it
         array = np.flip(array, axis=0)
-        nc_obj.close()
+        file_obj.close()
 
         # if you want to delete the source netcdfs as you go
         if delete_sources:
@@ -118,64 +121,64 @@ def netcdf_to_geotiff(files: list,
                 dtype=array.dtype,
                 nodata=np.nan,
                 crs=crs,
-                transform=affine,
+                transform=aff,
         ) as dst:
             dst.write(array, 1)
 
     return output_files
 
 
-def grib_to_geotiff(files: list,
-                    band_number: int,
-                    crs: str = 'EPSG:4326',
-                    fill_value: int = -9999,
-                    save_dir: str = False,
-                    delete_sources: bool = False) -> list:
+def upsample_geotiff(files: list, scale: float) -> list:
     """
-    Converts a certain band number in grib files to geotiffs. Assumes WGS1984 GCS.
+    Performs array math to artificially increase the resolution of a geotiff. No interpolation of values. A scale
+    factor of X means that the length of a horizontal and vertical grid cell decreases by X. Be careful, increasing the
+    resolution by X increases the file size by ~X^2
 
     Args:
         files: A list of absolute paths to the appropriate type of files (even if len==1)
-        band_number: the band number that the array of interest is located on
-        save_dir: The directory to store the geotiffs to. Default: directory containing the gribs.
-        fill_value: The value used for filling no_data spaces in the array. Default: -9999
-        delete_sources: Allows you to delete the source gribs as they are converted. Default: False
-        crs: Coordinate Reference System used by rasterio.open(). An EPSG ID string such as 'EPSG:4326' or
-            '+proj=latlong'
+        scale: A positive integer used as the multiplying factor to increase the resolution.
 
     Returns:
-        A list of paths to the geotiff files created
+        list of paths to the geotiff files created
     """
-    # determine the affine transformation
-    affine = affine_from_grib(files[0])
+    # Read raster dimensions
+    raster_dim = rasterio.open(files[0])
+    width = raster_dim.width
+    height = raster_dim.height
+    lon_min = raster_dim.bounds.left
+    lon_max = raster_dim.bounds.right
+    lat_min = raster_dim.bounds.bottom
+    lat_max = raster_dim.bounds.top
+    # Geotransform for each resampled raster (east, south, west, north, width, height)
+    affine_resampled = rasterio.transform.from_bounds(lon_min, lat_min, lon_max, lat_max, width * scale, height * scale)
+    # keep track of the new files
+    new_files = []
 
-    # A list of all the files that get written which can be returned
-    output_files = []
-
+    # Resample each GeoTIFF
     for file in files:
-        save_path = os.path.join(save_dir, os.path.basename(file) + '.tif')
-        output_files.append(save_path)
-        grib = pygrib.open(file)
-        grib.seek(0)
-        array = grib[band_number].values
-        array[array == fill_value] = np.nan  # If you have fill values, change the comparator to git rid of it
-
+        rio_obj = rasterio.open(file)
+        data = rio_obj.read(
+            out_shape=(int(rio_obj.height * scale), int(rio_obj.width * scale)),
+            resampling=Resampling.nearest
+        )
+        # Convert new resampled array from 3D to 2D
+        data = np.squeeze(data, axis=0)
+        # Specify the filepath of the resampled raster
+        new_filepath = os.path.splitext(file)[0] + '_upsampled.tiff'
+        new_files.append(new_filepath)
+        # Save the GeoTIFF
         with rasterio.open(
-                save_path,
+                new_filepath,
                 'w',
                 driver='GTiff',
-                height=array.shape[0],
-                width=array.shape[1],
+                height=data.shape[0],
+                width=data.shape[1],
                 count=1,
-                dtype=array.dtype,
+                dtype=data.dtype,
                 nodata=np.nan,
-                crs=crs,
-                transform=affine,
+                crs=rio_obj.crs,
+                transform=affine_resampled,
         ) as dst:
-            dst.write(array, 1)
+            dst.write(data, 1)
 
-        # if you want to delete the source gribs as you go
-        if delete_sources:
-            os.remove(file)
-
-    return output_files
+    return new_files
