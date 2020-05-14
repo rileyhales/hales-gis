@@ -3,16 +3,11 @@ import json
 import os
 
 import affine
-import h5py
-import netCDF4 as nc
-import pygrib
 import requests
-import xarray as xr
 
-from ._utils import open_by_engine
+from ._utils import open_by_engine, array_by_engine, recommend_engine
 
-__all__ = ['download_noaa_gfs', 'get_livingatlas_geojson', 'summarize_georeferencing', 'recommend_engine', 'summarize',
-           'gen_affine']
+__all__ = ['download_noaa_gfs', 'get_livingatlas_geojson', 'summarize_georeferencing', 'gen_affine']
 
 
 def download_noaa_gfs(save_path: str, steps: int) -> list:
@@ -151,7 +146,7 @@ def summarize_georeferencing(file: str,
 
     Args:
         file: the absolute path to a netcdf or grib file
-        file_type: The format of the data in the list of file paths provided by the files argument
+        engine: the python package used to power the file reading
         x_var: Name of the x coordinate variable used to spatial reference the array. Default: 'lon' (longitude)
         y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'lat' (latitude)
         xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
@@ -161,8 +156,8 @@ def summarize_georeferencing(file: str,
     """
     # open the file to be read
     ds = open_by_engine(file, engine, xr_kwargs)
-    x_data = ds[x_var].values
-    y_data = ds[y_var].values
+    x_data = array_by_engine(ds, engine, x_var)
+    y_data = array_by_engine(ds, engine, y_var)
 
     return {
         'x_first_val': x_data[0],
@@ -181,93 +176,6 @@ def summarize_georeferencing(file: str,
     }
 
 
-def recommend_engine(path: str) -> str:
-    """
-    Tries to guess the file format of a file based on the suffix of the file
-
-    Args:
-        path: the path to a data file
-
-    Returns:
-        str either 'netcdf', 'grib', 'geotiff', or 'hdf5'
-    """
-    # todo finish, print i think your file is a {file_type} which performs best with the {engine} engine
-    if path.endswith('.nc') or path.endswith('.nc4'):
-        return 'netcdf'
-    elif path.endswith('.grb') or path.endswith('.grib'):
-        return 'grib'
-    elif path.endswith('.gtiff') or path.endswith('.tiff') or path.endswith('tif'):
-        return 'geotiff'
-    elif path.endswith('.h5') or path.endswith('.hd5') or path.endswith('.hdf5'):
-        return 'hdf5'
-    else:
-        raise ValueError('File does not match known patterns. Specify file_type or use a standard file extensions')
-
-
-def summarize(path: str, band_number: int = 0) -> None:
-    """
-    Prints lots of messages showing information about variables, dimensions, and metadata
-
-    Args:
-        path: The path to a netcdf file.
-        band_number: (optional) An integer corresponding to the band number you want more information for
-    """
-    # todo
-    grib = pygrib.open(path)
-    grib.seek(0)
-    print('This is a summary of all the information in your grib file')
-    print(grib.read())
-
-    if band_number:
-        print()
-        print('The keys for this variable are:')
-        print(grib[band_number].keys())
-        print()
-        print('The data stored in this variable are:')
-        print(grib[band_number].values)
-
-    ds = h5py.File(path)
-    print('The following groups/variables are contained in this HDF5 file')
-    ds.visit(print)
-
-    nc_obj = nc.Dataset(path, 'r', clobber=False, diskless=True, persist=False)
-
-    print("This is your netCDF python object")
-    print(nc_obj)
-    print()
-
-    print("There are " + str(len(nc_obj.variables)) + " variables")  # The number of variables
-    print("There are " + str(len(nc_obj.dimensions)) + " dimensions")  # The number of dimensions
-    print()
-
-    print('These are the global attributes of the netcdf file')
-    print(nc_obj.__dict__)  # access the global attributes of the netcdf file
-    print()
-
-    print("Detailed view of each variable")
-    print()
-    for variable in nc_obj.variables.keys():  # .keys() gets the name of each variable
-        print('Variable Name:  ' + variable)  # The string name of the variable
-        print('The view of this variable in the netCDF python object')
-        print(nc_obj[variable])  # How to view the variable information (netcdf obj)
-        print('The data array stored in this variable')
-        print(nc_obj[variable][:])  # Access the numpy array inside the variable (array)
-        print('The dimensions associated with this variable')
-        print(nc_obj[variable].dimensions)  # Get the dimensions associated with a variable (tuple)
-        print('The metadata associated with this variable')
-        print(nc_obj[variable].__dict__)  # How to get the attributes of a variable (dictionary)
-        print()
-
-    for dimension in nc_obj.dimensions.keys():
-        print(nc_obj.dimensions[dimension].size)  # print the size of a dimension
-
-    nc_obj.close()  # close the file connection to the file
-
-    print(xr.open_rasterio(path))
-
-    return
-
-
 def gen_affine(path: str,
                engine: str = None,
                x_var: str = 'lon',
@@ -279,14 +187,19 @@ def gen_affine(path: str,
 
     Args:
         path: An absolute paths to the data file
+        engine: the python package used to power the file reading
         x_var: Name of the x coordinate variable used to spatial reference the array. Default: 'lon' (lon)
         y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'lat' (lat)
+        xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
+        h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
 
     Returns:
         tuple(affine.Affine, width: int, height: int)
     """
+    if engine is None:
+        engine = recommend_engine(path)
     raster = open_by_engine(path, engine, xr_kwargs)
-    if engine in ('xarray', 'cfgrib', 'netcdf4', 'rasterio'):
+    if engine in ('xarray', 'cfgrib', 'netcdf4'):
         lon = raster.variables[x_var][:]
         lat = raster.variables[y_var][:]
     elif engine == 'h5py':
@@ -294,7 +207,9 @@ def gen_affine(path: str,
             raster = raster[h5_group]
         lon = raster[x_var][:]
         lat = raster[y_var][:]
-    # todo finish engines
+    elif engine == 'rasterio':
+        return raster.transform
+    # todo affine for other engines
     # elif engine == 'pygrib':
     #     return pygrib.open(path)
     # elif engine in ('PIL', 'pillow'):
@@ -303,13 +218,10 @@ def gen_affine(path: str,
         raise ValueError(f'Unsupported engine: {engine}')
 
     if lat.ndim == 2:
-        height = len(lat[:, 0])
-    else:
-        height = len(lat)
+        lat = lat[:, 0]
     if lon.ndim == 2:
-        width = len(lon[0, :])
-    else:
-        width = len(lon)
+        lon = lon[0, :]
 
     raster.close()
     return affine.Affine(lon[1] - lon[0], 0, lon.min(), 0, lat[0] - lat[1], lat.max())
+

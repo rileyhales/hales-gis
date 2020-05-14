@@ -15,7 +15,7 @@ __all__ = ['point_series', 'box_series', 'shp_series', 'gen_ncml']
 def point_series(files: list,
                  var: str,
                  coords: tuple,
-                 engine: str = 'xarray',
+                 engine: str = None,
                  x_var: str = 'lon',
                  y_var: str = 'lat',
                  t_var: str = 'time',
@@ -41,12 +41,12 @@ def point_series(files: list,
     Returns:
         pandas.DataFrame
     """
-    if engine == 'raterio':
+    if engine == 'rasterio':
         x_var = 'x'
         y_var = 'y'
 
     # get information to slice the array with
-    slicing_info = get_slicing_info(files[0], engine, var, x_var, y_var, t_var, (coords,), xr_kwargs, h5_group)
+    slicing_info = get_slicing_info(files[0], var, x_var, y_var, t_var, (coords,), engine, xr_kwargs, h5_group)
     dim_order = slicing_info['dim_order']
     x_idx = slicing_info['indices'][0][0]
     y_idx = slicing_info['indices'][0][1]
@@ -59,7 +59,7 @@ def point_series(files: list,
     for file in files:
         # open the file
         opened_file = open_by_engine(file, engine, xr_kwargs)
-        ts = array_by_engine(opened_file, engine, t_var)
+        ts = array_by_engine(opened_file, t_var, h5_group)
         if ts.ndim == 0:
             times.append(ts)
         else:
@@ -67,7 +67,7 @@ def point_series(files: list,
                 times.append(t)
 
         # extract the appropriate values from the variable
-        vs = slice_array_cell(array_by_engine(opened_file, engine, var), dim_order, x_idx, y_idx)
+        vs = slice_array_cell(array_by_engine(opened_file, var, h5_group), dim_order, x_idx, y_idx)
         if vs.ndim == 0:
             if vs == fill_value:
                 vs = np.nan
@@ -86,7 +86,7 @@ def point_series(files: list,
 def box_series(files: list,
                var: str,
                coords: tuple,
-               engine: str = 'xarray',
+               engine: str = None,
                x_var: str = 'lon',
                y_var: str = 'lat',
                t_var: str = 'time',
@@ -114,12 +114,12 @@ def box_series(files: list,
     Returns:
         pandas.DataFrame
     """
-    if engine == 'raterio':
+    if engine == 'rasterio':
         x_var = 'x'
         y_var = 'y'
 
     # get information to slice the array with
-    slicing_info = get_slicing_info(files[0], engine, var, x_var, y_var, t_var, coords, xr_kwargs, h5_group)
+    slicing_info = get_slicing_info(files[0], var, x_var, y_var, t_var, coords, engine, xr_kwargs, h5_group)
     dim_order = slicing_info['dim_order']
     xmin_idx = min(slicing_info['indices'][0][0], slicing_info['indices'][1][0])
     xmax_idx = max(slicing_info['indices'][0][0], slicing_info['indices'][1][0])
@@ -136,7 +136,7 @@ def box_series(files: list,
         opened_file = open_by_engine(file, engine, xr_kwargs)
 
         # get the times
-        ts = array_by_engine(opened_file, engine, t_var)
+        ts = array_by_engine(opened_file, t_var, h5_group)
         if ts.ndim == 0:
             times.append(ts)
         else:
@@ -145,7 +145,7 @@ def box_series(files: list,
 
         # slice the variable's array, returns array with shape corresponding to dimension order and size
         vs = slice_array_range(
-            array_by_engine(opened_file, engine, var), dim_order, xmin_idx, ymin_idx, xmax_idx, ymax_idx)
+            array_by_engine(opened_file, var, h5_group), dim_order, xmin_idx, ymin_idx, xmax_idx, ymax_idx)
         vs[vs == fill_value] = np.nan
         # add the results to the lists of values and times
         if vs.ndim == 1 or vs.ndim == 2:
@@ -176,7 +176,7 @@ def box_series(files: list,
 def shp_series(files: list,
                var: str,
                shp_path: str,
-               engine: str = 'xarray',
+               engine: str = None,
                x_var: str = 'lon',
                y_var: str = 'lat',
                t_var: str = 'time',
@@ -208,12 +208,12 @@ def shp_series(files: list,
 
             data = geomatics.timedata.shp_series([list, of, file, paths], 'AirTemp', '/path/to/shapefile.shp')
     """
-    if engine == 'raterio':
+    if engine == 'rasterio':
         x_var = 'x'
         y_var = 'y'
 
     # get information to slice the array with
-    slicing_info = get_slicing_info(files[0], engine, var, x_var, y_var, t_var, None, xr_kwargs, h5_group)
+    slicing_info = get_slicing_info(files[0], var, x_var, y_var, t_var, None, engine, xr_kwargs, h5_group)
     dim_order = slicing_info['dim_order']
 
     # generate an affine transform used in zonal statistics
@@ -227,7 +227,7 @@ def shp_series(files: list,
     for file in files:
         # open the file
         opened_file = open_by_engine(file, engine, xr_kwargs)
-        ts = array_by_engine(opened_file, engine, t_var)
+        ts = array_by_engine(opened_file, t_var, h5_group)
         if ts.ndim == 0:
             times.append(ts)
         else:
@@ -235,7 +235,7 @@ def shp_series(files: list,
                 times.append(t)
 
         # slice the variable's array, returns array with shape corresponding to dimension order and size
-        vs = array_by_engine(opened_file, engine, var)
+        vs = array_by_engine(opened_file, var, h5_group)
         vs[vs == fill_value] = np.nan
         # modify the array as necessary
         if vs.ndim == 2:

@@ -7,6 +7,5 @@ API Documentation
 
 	convert
 	data
-	geotiffs
-	prj
-	timedata
+	inspect
+	times

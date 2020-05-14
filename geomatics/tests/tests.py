@@ -83,9 +83,20 @@ if __name__ == '__main__':
     # test_grib_tools()
     # print('hdf5 tests')
     # test_hdf5_tools()
-
     netcdf_files = sorted(glob.glob('/Users/riley/spatialdata/thredds/gldas/raw/*.nc4'))
+    grib_files = sorted(glob.glob('/Users/riley/spatialdata/thredds/gfs/*.grb'))
+
     pt_coords = (-112, 45)
     bx_coords = ((-115, 40), (-110, 45))
     print(geomatics.times.point_series(netcdf_files, 'Tair_f_inst', pt_coords))
     print(geomatics.times.box_series(netcdf_files, 'Tair_f_inst', bx_coords))
+    geomatics.convert.to_geotiff(netcdf_files[0], 'Tair_f_inst')
+
+    pt_coords = (-112 + 360, 45)
+    bx_coords = ((-115 + 360, 40), (-110 + 360, 45))
+    xrargs = {'filter_by_keys': {'cfVarName': 'al', 'typeOfLevel': 'surface'}}
+    print(geomatics.times.point_series(grib_files, 'al', pt_coords, x_var='longitude', y_var='latitude',
+                                       xr_kwargs=xrargs))
+    print(
+        geomatics.times.box_series(grib_files, 'al', bx_coords, x_var='longitude', y_var='latitude', xr_kwargs=xrargs))
+    geomatics.convert.to_geotiff(grib_files[0], 'al', x_var='longitude', y_var='latitude', xr_kwargs=xrargs)

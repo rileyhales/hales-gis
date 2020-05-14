@@ -4,15 +4,15 @@ convert
 
 Methods for converting formats of common spatial data
 
-To Shapefile
-~~~~~~~~~~~~
+Shapefile
+~~~~~~~~~
 
 .. automodule:: geomatics.convert
 	:members: geojson_to_shapefile
 
-To GeoTIFF
-~~~~~~~~~~~~
+GeoTIFF
+~~~~~~~
 
 .. automodule:: geomatics.convert
-	:members: netcdf_to_geotiff, grib_to_geotiff
+	:members: to_geotiff, upsample_geotiff
 	:noindex:
