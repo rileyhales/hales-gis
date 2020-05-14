@@ -1,40 +1,32 @@
 import h5py
-import netCDF4 as nc
 import numpy as np
-import pygrib
 import xarray as xr
 from PIL import TiffImagePlugin, Image
 
-__all__ = ['open_by_engine', 'array_by_engine', 'get_slicing_info', 'slice_array_cell', 'slice_array_range',
-           'recommend_engine']
+__all__ = ['open_by_engine', 'array_by_engine', 'pick_engine', 'get_slicing_info', 'slice_array_cell',
+           'slice_array_range', 'check_var_in_dataset']
 
 
 def open_by_engine(path: str, engine: str = None, backend_kwargs: dict = None) -> np.array:
     if engine is None:
-        engine = recommend_engine(path)
+        engine = pick_engine(path)
     if backend_kwargs is None:
         backend_kwargs = dict()
     if engine == 'xarray':
         return xr.open_dataset(path, backend_kwargs=backend_kwargs)
     elif engine == 'cfgrib':
         return xr.open_dataset(path, engine='cfgrib', backend_kwargs=backend_kwargs)
-    elif engine == 'netcdf4':
-        return nc.Dataset(path)
     elif engine == 'h5py':
         return h5py.File(path, 'r')
-    elif engine == 'pygrib':
-        grib = pygrib.open(path, 'r')
-        grib.seek(0)
-        return grib.read()
     elif engine in ('PIL', 'pillow'):
         return Image.open(path, 'r')
     elif engine == 'rasterio':
         return xr.open_rasterio(path)
     else:
-        raise ValueError(f'Unsupported engine: {engine}')
+        raise ValueError(f'Unable to open file, unsupported engine: {engine}')
 
 
-def array_by_engine(open_file, var: str, h5_group: str = None, band_number: int = None):
+def array_by_engine(open_file, var: str, h5_group: str = None):
     if isinstance(open_file, xr.Dataset):  # xarray
         return open_file[var].data
     elif isinstance(open_file, h5py.Dataset):  # h5py
@@ -42,12 +34,23 @@ def array_by_engine(open_file, var: str, h5_group: str = None, band_number: int 
         if h5_group is not None:
             open_file = open_file[h5_group]
         return open_file[...]
-    elif isinstance(open_file, pygrib.open):  # pygrib
-        return open_file[band_number].values
     elif isinstance(open_file, TiffImagePlugin.TiffImageFile):  # geotiff
         return np.array(open_file)
     else:
         raise ValueError(f'Unrecognized opened file dataset: {type(open_file)}')
+
+
+def pick_engine(path: str) -> str:
+    if path.endswith('.nc') or path.endswith('.nc4'):
+        return 'xarray'
+    elif path.endswith('.grb') or path.endswith('.grib'):
+        return 'cfgrib'
+    elif path.endswith('.gtiff') or path.endswith('.tiff') or path.endswith('tif'):
+        return 'rasterio'
+    elif path.endswith('.h5') or path.endswith('.hd5') or path.endswith('.hdf5'):
+        return 'h5py'
+    else:
+        raise ValueError(f'File does not match known files extension patterns: {path}')
 
 
 def get_slicing_info(path: str,
@@ -58,15 +61,14 @@ def get_slicing_info(path: str,
                      coords: tuple,
                      engine: str = None,
                      xr_kwargs: dict = None,
-                     h5_group: str = None,
-                     band_number: int = None) -> dict:
+                     h5_group: str = None, ) -> dict:
     if engine is None:
-        engine = recommend_engine(path)
+        engine = pick_engine(path)
     # open the file to be read
     tmp_file = open_by_engine(path, engine, xr_kwargs)
 
     # validate choice in variables
-    if not validate_var_in_dataset(tmp_file, var, h5_group, band_number):
+    if not check_var_in_dataset(tmp_file, var, h5_group):
         raise ValueError(f'the variable "{var}" was not found in the file {path}')
 
     # get a list of the x&y coordinates
@@ -181,29 +183,7 @@ def slice_array_range(array, dim_order, xmin_index, ymin_index, xmax_index, ymax
         raise ValueError('Unrecognized order of dimensions, unable to slice array.')
 
 
-def recommend_engine(path: str) -> str:
-    """
-    Tries to guess the file format of a file based on the suffix of the file
-
-    Args:
-        path: the path to a data file
-
-    Returns:
-        str name of recommend engine
-    """
-    if path.endswith('.nc') or path.endswith('.nc4'):
-        return 'xarray'
-    elif path.endswith('.grb') or path.endswith('.grib'):
-        return 'cfgrib'
-    elif path.endswith('.gtiff') or path.endswith('.tiff') or path.endswith('tif'):
-        return 'rasterio'
-    elif path.endswith('.h5') or path.endswith('.hd5') or path.endswith('.hdf5'):
-        return 'h5py'
-    else:
-        raise ValueError(f'File does not match known files extension patterns: {path}')
-
-
-def validate_var_in_dataset(open_file, variable, h5_group, band_number):
+def check_var_in_dataset(open_file, variable, h5_group):
     if isinstance(open_file, xr.Dataset):  # xarray
         return bool(variable in open_file.variables)
     elif isinstance(open_file, h5py.Dataset):  # h5py
@@ -211,15 +191,7 @@ def validate_var_in_dataset(open_file, variable, h5_group, band_number):
         if h5_group is not None:
             open_file = open_file[h5_group]
         return bool(variable in open_file.keys())
-    elif isinstance(open_file, pygrib.open):  # pygrib
-        try:
-            open_file[band_number]
-            return True
-        except IndexError:
-            return False
     elif isinstance(open_file, TiffImagePlugin.TiffImageFile):  # geotiff
         return False
     else:
         raise ValueError(f'Unrecognized opened file dataset: {type(open_file)}')
-
-    return False

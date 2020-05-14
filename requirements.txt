@@ -3,7 +3,7 @@ rasterstats
 xarray
 h5py
 netcdf4
-pygrib
+eccodes
 cfgrib
 python-dateutil
 numpy

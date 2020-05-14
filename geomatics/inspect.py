@@ -1,9 +1,10 @@
 import h5py
 import netCDF4 as nc
-import pygrib
 import xarray as xr
 
-__all__ = ['netcdf', 'grib', 'hdf5', 'geotiff']
+from ._utils import open_by_engine, array_by_engine
+
+__all__ = ['netcdf', 'grib', 'hdf5', 'geotiff', 'georeferencing']
 
 
 def netcdf(path: str) -> None:
@@ -48,26 +49,19 @@ def netcdf(path: str) -> None:
     return
 
 
-def grib(path: str, band_number: int = False) -> None:
+def grib(path: str, xr_kwargs: dict = None) -> None:
     """
     Prints a summary of the information available when you open a grib with pygrib
 
     Args:
         path: The path to any grib file
-        band_number: Optional band number
+        xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
     """
-    grib = pygrib.open(path)
-    grib.seek(0)
-    print('This is a summary of all the information in your grib file')
-    print(grib.read())
-
-    if band_number:
-        print()
-        print('The keys for this variable are:')
-        print(grib[band_number].keys())
-        print()
-        print('The data stored in this variable are:')
-        print(grib[band_number].values)
+    gb = xr.open_dataset(path, engine='cfgrib', backend_kwargs=xr_kwargs)
+    print('These are the variables')
+    print(gb.variables)
+    print('These are the dimensions')
+    print(gb.dims)
     return
 
 
@@ -93,3 +87,45 @@ def geotiff(path: str) -> None:
     """
     print(xr.open_rasterio(path))
     return
+
+
+def georeferencing(file: str,
+                   engine: str = None,
+                   x_var: str = 'lon',
+                   y_var: str = 'lat',
+                   xr_kwargs: dict = None,
+                   h5_group: str = None) -> dict:
+    """
+    Determines the information needed to create an affine transformation for a geo-referenced data array.
+
+    Args:
+        file: the absolute path to a netcdf or grib file
+        engine: the python package used to power the file reading
+        x_var: Name of the x coordinate variable used to spatial reference the array. Default: 'lon' (longitude)
+        y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'lat' (latitude)
+        xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
+        h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
+
+    Returns:
+        A dictionary containing the information needed to create the affine transformation of a dataset.
+    """
+    # open the file to be read
+    ds = open_by_engine(file, engine, xr_kwargs)
+    x_data = array_by_engine(ds, x_var, h5_group)
+    y_data = array_by_engine(ds, y_var, h5_group)
+
+    return {
+        'x_first_val': x_data[0],
+        'x_last_val': x_data[-1],
+        'x_min': x_data.min(),
+        'x_max': x_data.max(),
+        'x_num_values': x_data.size,
+        'x_resolution': x_data[1] - x_data[0],
+
+        'y_first_val': y_data[0],
+        'y_last_val': y_data[-1],
+        'y_min': y_data.min(),
+        'y_max': y_data.max(),
+        'y_num_values': y_data.size,
+        'y_resolution': y_data[1] - y_data[0]
+    }

@@ -3,11 +3,13 @@ import json
 import os
 
 import affine
+import h5py
 import requests
+import xarray as xr
 
-from ._utils import open_by_engine, array_by_engine, recommend_engine
+from ._utils import open_by_engine
 
-__all__ = ['download_noaa_gfs', 'get_livingatlas_geojson', 'summarize_georeferencing', 'gen_affine']
+__all__ = ['download_noaa_gfs', 'get_livingatlas_geojson', 'gen_affine']
 
 
 def download_noaa_gfs(save_path: str, steps: int) -> list:
@@ -136,50 +138,10 @@ def get_livingatlas_geojson(location: str) -> dict:
     return json.loads(req.text)
 
 
-def summarize_georeferencing(file: str,
-                             engine: str = None,
-                             x_var: str = 'lon',
-                             y_var: str = 'lat',
-                             xr_kwargs: dict = None) -> dict:
-    """
-    Determines the information needed to create an affine transformation for a geo-referenced data array.
-
-    Args:
-        file: the absolute path to a netcdf or grib file
-        engine: the python package used to power the file reading
-        x_var: Name of the x coordinate variable used to spatial reference the array. Default: 'lon' (longitude)
-        y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'lat' (latitude)
-        xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
-
-    Returns:
-        A dictionary containing the information needed to create the affine transformation of a dataset.
-    """
-    # open the file to be read
-    ds = open_by_engine(file, engine, xr_kwargs)
-    x_data = array_by_engine(ds, engine, x_var)
-    y_data = array_by_engine(ds, engine, y_var)
-
-    return {
-        'x_first_val': x_data[0],
-        'x_last_val': x_data[-1],
-        'x_min': x_data.min(),
-        'x_max': x_data.max(),
-        'x_num_values': x_data.size,
-        'x_resolution': x_data[1] - x_data[0],
-
-        'y_first_val': y_data[0],
-        'y_last_val': y_data[-1],
-        'y_min': y_data.min(),
-        'y_max': y_data.max(),
-        'y_num_values': y_data.size,
-        'y_resolution': y_data[1] - y_data[0]
-    }
-
-
 def gen_affine(path: str,
-               engine: str = None,
                x_var: str = 'lon',
                y_var: str = 'lat',
+               engine: str = None,
                xr_kwargs: dict = None,
                h5_group: str = None) -> affine.Affine:
     """
@@ -187,33 +149,26 @@ def gen_affine(path: str,
 
     Args:
         path: An absolute paths to the data file
-        engine: the python package used to power the file reading
         x_var: Name of the x coordinate variable used to spatial reference the array. Default: 'lon' (lon)
         y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'lat' (lat)
+        engine: the python package used to power the file reading
         xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
         h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
 
     Returns:
         tuple(affine.Affine, width: int, height: int)
     """
-    if engine is None:
-        engine = recommend_engine(path)
     raster = open_by_engine(path, engine, xr_kwargs)
-    if engine in ('xarray', 'cfgrib', 'netcdf4'):
+    if isinstance(raster, xr.Dataset):  # xarray
         lon = raster.variables[x_var][:]
         lat = raster.variables[y_var][:]
-    elif engine == 'h5py':
-        if h5_group:
+    elif isinstance(raster, h5py.Dataset):  # h5py
+        if h5_group is not None:
             raster = raster[h5_group]
         lon = raster[x_var][:]
         lat = raster[y_var][:]
-    elif engine == 'rasterio':
+    elif isinstance(raster, xr.DataArray):  # raster
         return raster.transform
-    # todo affine for other engines
-    # elif engine == 'pygrib':
-    #     return pygrib.open(path)
-    # elif engine in ('PIL', 'pillow'):
-    #     return Image
     else:
         raise ValueError(f'Unsupported engine: {engine}')
 
@@ -224,4 +179,3 @@ def gen_affine(path: str,
 
     raster.close()
     return affine.Affine(lon[1] - lon[0], 0, lon.min(), 0, lat[0] - lat[1], lat.max())
-

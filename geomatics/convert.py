@@ -67,7 +67,6 @@ def to_geotiff(files: list,
                x_var: str = 'lon',
                y_var: str = 'lat',
                xr_kwargs: dict = None,
-               band_number: int = None,
                h5_group: str = None,
                fill_value: int = -9999,
                save_dir: str = False,
@@ -78,10 +77,13 @@ def to_geotiff(files: list,
     Args:
         files: A list of absolute paths to the appropriate type of files (even if len==1)
         var: The name of a variable as it is stored in the netcdf e.g. 'temp' instead of Temperature
+        engine: the python package used to power the file reading
         aff: an affine.Affine transformation for the data if you already know what it is
         crs: Coordinate Reference System used by rasterio.open(). An EPSG such as 'EPSG:4326' or '+proj=latlong'
         x_var: Name of the x coordinate variable used to spatial reference the netcdf array. Default: 'lon'
         y_var: Name of the y coordinate variable used to spatial reference the netcdf array. Default: 'lat'
+        h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
+        xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
         save_dir: The directory to store the geotiffs to. Default: directory containing the netcdfs.
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
         delete_sources: Allows you to delete the source netcdfs as they are converted. Default: False
@@ -92,7 +94,7 @@ def to_geotiff(files: list,
     if isinstance(files, str):
         files = [files, ]
     if aff is None:
-        aff = gen_affine(files[0], engine, x_var, y_var, xr_kwargs=xr_kwargs)
+        aff = gen_affine(files[0], x_var, y_var, engine=engine, xr_kwargs=xr_kwargs)
 
     # A list of all the files that get written which can be returned
     output_files = []
@@ -108,7 +110,7 @@ def to_geotiff(files: list,
 
         # open the netcdf and get the data array
         file_obj = open_by_engine(file, engine, xr_kwargs)
-        array = np.asarray(array_by_engine(file_obj, var=var, band_number=band_number, h5_group=h5_group))
+        array = np.asarray(array_by_engine(file_obj, var=var, h5_group=h5_group))
         array = np.squeeze(array)
         array[array == fill_value] = np.nan  # If you have fill values, change the comparator to git rid of it
         array = np.flip(array, axis=0)

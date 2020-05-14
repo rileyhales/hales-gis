@@ -14,5 +14,5 @@ Georeferencing
 ~~~~~~~~~~~~~~
 
 .. automodule:: geomatics.data
-	:members: summarize_georeferencing, gen_affine
+	:members: gen_affine
 	:noindex:

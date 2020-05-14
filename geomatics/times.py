@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import rasterstats
 
-from ._utils import open_by_engine, array_by_engine, get_slicing_info, slice_array_cell, slice_array_range
+from ._utils import open_by_engine, array_by_engine, get_slicing_info, slice_array_cell, slice_array_range, pick_engine
 from .data import gen_affine
 
 __all__ = ['point_series', 'box_series', 'shp_series', 'gen_ncml']
@@ -15,13 +15,13 @@ __all__ = ['point_series', 'box_series', 'shp_series', 'gen_ncml']
 def point_series(files: list,
                  var: str,
                  coords: tuple,
-                 engine: str = None,
                  x_var: str = 'lon',
                  y_var: str = 'lat',
                  t_var: str = 'time',
+                 fill_value: int = -9999,
+                 engine: str = None,
                  h5_group: str = None,
-                 xr_kwargs: dict = None,
-                 fill_value: int = -9999) -> pd.DataFrame:
+                 xr_kwargs: dict = None, ) -> pd.DataFrame:
     """
     Creates a timeseries of values at the grid cell closest to a specified point.
 
@@ -30,17 +30,19 @@ def point_series(files: list,
         var: The name of a variable as it is stored in the file e.g. often 'temp' or 'T' instead of Temperature
         coords: A tuple (x_value, y_value) where the xy values are the location you want to extract values for
             in units of the x and y coordinate variable
-        engine: the python package used to power the file reading
         x_var: Name of the x coordinate variable used to spatial reference the array. Default: 'lon'
         y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'lat'
         t_var: Name of the time coordinate variable used for time referencing the data. Default: 'time'
+        fill_value: The value used for filling no_data spaces in the array. Default: -9999
+        engine: the python package used to power the file reading
         h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
         xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
-        fill_value: The value used for filling no_data spaces in the array. Default: -9999
 
     Returns:
         pandas.DataFrame
     """
+    if engine is None:
+        engine = pick_engine(files[0])
     if engine == 'rasterio':
         x_var = 'x'
         y_var = 'y'
@@ -59,7 +61,7 @@ def point_series(files: list,
     for file in files:
         # open the file
         opened_file = open_by_engine(file, engine, xr_kwargs)
-        ts = array_by_engine(opened_file, t_var, h5_group)
+        ts = array_by_engine(opened_file, t_var, h5_group=h5_group)
         if ts.ndim == 0:
             times.append(ts)
         else:
@@ -86,14 +88,14 @@ def point_series(files: list,
 def box_series(files: list,
                var: str,
                coords: tuple,
-               engine: str = None,
                x_var: str = 'lon',
                y_var: str = 'lat',
                t_var: str = 'time',
-               h5_group: str = None,
-               xr_kwargs: dict = None,
                fill_value: int = -9999,
-               stat_type: str = 'mean') -> pd.DataFrame:
+               stat_type: str = 'mean',
+               engine: str = None,
+               h5_group: str = None,
+               xr_kwargs: dict = None, ) -> pd.DataFrame:
     """
     Creates a timeseries of values based on values within a bounding box specified by your coordinates.
 
@@ -102,14 +104,14 @@ def box_series(files: list,
         var: The name of a variable as it is stored in the file e.g. often 'temp' or 'T' instead of Temperature
         coords: A tuple of the format ((min_x_value, min_y_value), (max_x_value, max_y_value)) where the xy values
             are in units of the x and y coordinate variable
-        engine: the python package used to power the file reading
         x_var: Name of the x coordinate variable used to spatial reference the array. Default: 'lon'
         y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'lat'
         t_var: Name of the time coordinate variable used for time referencing the data. Default: 'time'
-        h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
-        xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
         stat_type: The method to turn the values within a bounding box into a single value. Eg mean, min, max
+        engine: the python package used to power the file reading
+        h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
+        xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
 
     Returns:
         pandas.DataFrame
@@ -136,7 +138,7 @@ def box_series(files: list,
         opened_file = open_by_engine(file, engine, xr_kwargs)
 
         # get the times
-        ts = array_by_engine(opened_file, t_var, h5_group)
+        ts = array_by_engine(opened_file, t_var, h5_group=h5_group)
         if ts.ndim == 0:
             times.append(ts)
         else:
@@ -145,7 +147,7 @@ def box_series(files: list,
 
         # slice the variable's array, returns array with shape corresponding to dimension order and size
         vs = slice_array_range(
-            array_by_engine(opened_file, var, h5_group), dim_order, xmin_idx, ymin_idx, xmax_idx, ymax_idx)
+            array_by_engine(opened_file, var, h5_group=h5_group), dim_order, xmin_idx, ymin_idx, xmax_idx, ymax_idx)
         vs[vs == fill_value] = np.nan
         # add the results to the lists of values and times
         if vs.ndim == 1 or vs.ndim == 2:
@@ -176,14 +178,14 @@ def box_series(files: list,
 def shp_series(files: list,
                var: str,
                shp_path: str,
-               engine: str = None,
                x_var: str = 'lon',
                y_var: str = 'lat',
                t_var: str = 'time',
-               h5_group: str = None,
-               xr_kwargs: dict = None,
                fill_value: int = -9999,
-               stat_type: str = 'mean') -> pd.DataFrame:
+               stat_type: str = 'mean',
+               engine: str = None,
+               h5_group: str = None,
+               xr_kwargs: dict = None, ) -> pd.DataFrame:
     """
     Creates a timeseries of values within the boundaries of your polygon shapefile of the same coordinate system.
 
@@ -191,14 +193,14 @@ def shp_series(files: list,
         files: A list of absolute paths to netcdf or gribs files (even if len==1)
         var: The name of a variable as it is stored in the file e.g. often 'temp' or 'T' instead of Temperature
         shp_path: An absolute path to the .shp file in a shapefile. Must be same coord system as the raster data.
-        engine: the python package used to power the file reading
         x_var: Name of the x coordinate variable used to spatial reference the array. Default: 'lon'
         y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'lat'
         t_var: Name of the time coordinate variable used for time referencing the data. Default: 'time'
-        h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
-        xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
         stat_type: The stats method to turn the values within the bounding box into a single value. Default: 'mean'
+        engine: the python package used to power the file reading
+        h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
+        xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
 
     Returns:
         pandas.DataFrame
@@ -217,7 +219,7 @@ def shp_series(files: list,
     dim_order = slicing_info['dim_order']
 
     # generate an affine transform used in zonal statistics
-    affine = gen_affine(files[0], engine, x_var, y_var, xr_kwargs, h5_group)
+    affine = gen_affine(files[0], x_var, y_var, engine=engine, xr_kwargs=xr_kwargs, h5_group=h5_group)
 
     # make the return item
     times = []
@@ -227,7 +229,7 @@ def shp_series(files: list,
     for file in files:
         # open the file
         opened_file = open_by_engine(file, engine, xr_kwargs)
-        ts = array_by_engine(opened_file, t_var, h5_group)
+        ts = array_by_engine(opened_file, t_var, h5_group=h5_group)
         if ts.ndim == 0:
             times.append(ts)
         else:
