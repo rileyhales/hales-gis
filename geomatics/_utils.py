@@ -3,7 +3,7 @@ import numpy as np
 import xarray as xr
 from PIL import TiffImagePlugin, Image
 
-__all__ = ['_open_by_engine', '_array_by_engine', '_pick_engine', '_check_var_in_dataset']
+__all__ = ['_open_by_engine', '_array_by_engine', '_pick_engine', '_check_var_in_dataset', '_array_to_stat_list']
 
 
 def _open_by_engine(path: str, engine: str = None, backend_kwargs: dict = None) -> np.array:
@@ -66,3 +66,32 @@ def _check_var_in_dataset(open_file, variable, h5_group):
         return False
     else:
         raise ValueError(f'Unrecognized opened file dataset: {type(open_file)}')
+
+
+def _array_to_stat_list(array: np.array, statistic: str) -> list:
+    list_of_stats = []
+    # add the results to the lists of values and times
+    if array.ndim == 1 or array.ndim == 2:
+        if statistic == 'mean':
+            list_of_stats.append(np.mean(array))
+        elif statistic == 'median':
+            list_of_stats.append(np.median(array))
+        elif statistic == 'max':
+            list_of_stats.append(np.max(array))
+        elif statistic == 'min':
+            list_of_stats.append(np.min(array))
+        else:
+            raise ValueError(f'Unrecognized statistic, {statistic}. Use stat_type= mean, min or max')
+    else:
+        for v in array:
+            if statistic == 'mean':
+                list_of_stats.append(np.mean(v))
+            elif statistic == 'median':
+                list_of_stats.append(np.median(v))
+            elif statistic == 'max':
+                list_of_stats.append(np.max(v))
+            elif statistic == 'min':
+                list_of_stats.append(np.min(v))
+            else:
+                raise ValueError(f'Unrecognized statistic, {statistic}. Use stat_type= mean, min or max')
+    return list_of_stats
