@@ -9,8 +9,8 @@ __all__ = ['point_series']
 # TIMESERIES FUNCTIONS
 def point_series(files: list,
                  var: str,
-                 dimension: str,
-                 identifier: int,
+                 dim: str,
+                 ident: int,
                  t_var: str = 'time',
                  fill_value: int = -9999,
                  engine: str = None,
@@ -22,8 +22,8 @@ def point_series(files: list,
     Args:
         files: A list of absolute paths to netcdf or gribs files (even if len==1)
         var: The name of a variable as it is stored in the file e.g. often 'temp' or 'T' instead of Temperature
-        dimension: The name of the variable containing the labeling/identifying information for the 1D data in the `var`
-        identifier: The value of the `dimension` which you're interested in
+        dim: The name of the variable containing the labeling/identifying information for the 1D data in the `var`
+        ident: The value of the `dimension` which you're interested in
         t_var: Name of the time coordinate variable used for time referencing the data. Default: 'time'
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
         engine: the python package used to power the file reading
@@ -37,7 +37,7 @@ def point_series(files: list,
         engine = _pick_engine(files[0])
 
     # get information to slice the array with
-    dim_order, idx = _slicing_info_1d(files[0], var, dimension, identifier, t_var, engine, xr_kwargs, h5_group)
+    dim_order, idx = _slicing_info_1d(files[0], var, dim, ident, t_var, engine, xr_kwargs, h5_group)
 
     # make the return item
     times = []
@@ -75,7 +75,7 @@ def point_series(files: list,
 def _slicing_info_1d(path: str,
                      var: str,
                      dimension: str,
-                     id: int,
+                     identifier: int,
                      t_var: str,
                      engine: str = None,
                      xr_kwargs: dict = None,
@@ -118,14 +118,14 @@ def _slicing_info_1d(path: str,
     # gather all the indices
     d_min = dim_vals.min()
     d_max = dim_vals.max()
-    if id < d_min or id > d_max:
-        raise ValueError(f'specified id value ({id}) is outside the bounds of the data: [{d_min}, {d_max}]')
+    if identifier < d_min or identifier > d_max:
+        raise ValueError(f'specified id value ({identifier}) is outside the bounds of the data: [{d_min}, {d_max}]')
     # if the exact value is in the list, use that. otherwise find the closest to it
-    if id in dim_vals:
-        index = list(dim_vals).index(id)
+    if identifier in dim_vals:
+        index = list(dim_vals).index(identifier)
     else:
         # todo maybe raise some kind of warning here?
-        index = (np.abs(dim_vals - id)).argmin()
+        index = (np.abs(dim_vals - identifier)).argmin()
 
     return dims, index
 

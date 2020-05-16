@@ -105,7 +105,7 @@ def box_series(files: list,
         y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'lat'
         t_var: Name of the time coordinate variable used for time referencing the data. Default: 'time'
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
-        stat_type: The method to turn the values within a bounding box into a single value. Eg mean, min, max
+        stat_type: The method to turn the values within a bounding box into a single value: mean, min, max, median
         engine: the python package used to power the file reading
         h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
         xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
@@ -150,6 +150,8 @@ def box_series(files: list,
         if vs.ndim == 1 or vs.ndim == 2:
             if stat_type == 'mean':
                 values.append(np.mean(vs))
+            elif stat_type == 'median':
+                values.append(np.median(vs))
             elif stat_type == 'max':
                 values.append(np.max(vs))
             elif stat_type == 'min':
@@ -160,6 +162,8 @@ def box_series(files: list,
             for v in vs:
                 if stat_type == 'mean':
                     values.append(np.mean(v))
+                elif stat_type == 'median':
+                    values.append(np.median(v))
                 elif stat_type == 'max':
                     values.append(np.max(v))
                 elif stat_type == 'min':
@@ -194,7 +198,7 @@ def shp_series(files: list,
         y_var: Name of the y coordinate variable used to spatial reference the array. Default: 'lat'
         t_var: Name of the time coordinate variable used for time referencing the data. Default: 'time'
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
-        stat_type: The stats method to turn the values within the bounding box into a single value. Default: 'mean'
+        stat_type: The method to turn the values within the shapefile into a single value: mean, min, max, median
         engine: the python package used to power the file reading
         h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
         xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
@@ -249,7 +253,7 @@ def shp_series(files: list,
         for values_2d in vs:
             # actually do the gis to get the value within the shapefile
             stats = rasterstats.zonal_stats(shp_path, values_2d, affine=affine, nodata=np.nan, stats=stat_type)
-            # if your shapefile has many polygons, you get many values back. weighted average of those values.
+            # if your shapefile has many polygons, you get many values back. average them.
             tmp = [i[stat_type] for i in stats if i[stat_type] is not None]
             values.append(sum(tmp) / len(tmp))
 
