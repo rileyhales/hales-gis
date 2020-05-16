@@ -53,6 +53,8 @@ def _pick_engine(path: str) -> str:
 
 
 def _check_var_in_dataset(open_file, variable, h5_group):
+    # if isinstance(variable, str):
+    #     variable = [variable, ]
     if isinstance(open_file, xr.Dataset):  # xarray
         return bool(variable in open_file.variables)
     elif isinstance(open_file, h5py.Dataset):  # h5py
