@@ -6,7 +6,7 @@ import rasterio
 import shapefile
 from rasterio.enums import Resampling
 
-from ._utils import open_by_engine, array_by_engine
+from ._utils import _open_by_engine, _array_by_engine
 from .data import gen_affine
 
 __all__ = ['geojson_to_shapefile', 'to_geotiff', 'upsample_geotiff']
@@ -109,8 +109,8 @@ def to_geotiff(files: list,
         output_files.append(save_path)
 
         # open the netcdf and get the data array
-        file_obj = open_by_engine(file, engine, xr_kwargs)
-        array = np.asarray(array_by_engine(file_obj, var=var, h5_group=h5_group))
+        file_obj = _open_by_engine(file, engine, xr_kwargs)
+        array = np.asarray(_array_by_engine(file_obj, var=var, h5_group=h5_group))
         array = np.squeeze(array)
         array[array == fill_value] = np.nan  # If you have fill values, change the comparator to git rid of it
         array = np.flip(array, axis=0)

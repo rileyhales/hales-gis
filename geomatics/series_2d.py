@@ -1,14 +1,11 @@
-import os
-
-import netCDF4 as nc
 import numpy as np
 import pandas as pd
 import rasterstats
 
-from ._utils import open_by_engine, array_by_engine, get_slicing_info, slice_array_cell, slice_array_range, pick_engine
+from ._utils import _open_by_engine, _array_by_engine, _pick_engine, _check_var_in_dataset
 from .data import gen_affine
 
-__all__ = ['point_series', 'box_series', 'shp_series', 'gen_ncml']
+__all__ = ['point_series', 'box_series', 'shp_series']
 
 
 # TIMESERIES FUNCTIONS
@@ -42,13 +39,13 @@ def point_series(files: list,
         pandas.DataFrame
     """
     if engine is None:
-        engine = pick_engine(files[0])
+        engine = _pick_engine(files[0])
     if engine == 'rasterio':
         x_var = 'x'
         y_var = 'y'
 
     # get information to slice the array with
-    slicing_info = get_slicing_info(files[0], var, x_var, y_var, t_var, (coords,), engine, xr_kwargs, h5_group)
+    slicing_info = _slicing_info_2d(files[0], var, x_var, y_var, t_var, (coords,), engine, xr_kwargs, h5_group)
     dim_order = slicing_info['dim_order']
     x_idx = slicing_info['indices'][0][0]
     y_idx = slicing_info['indices'][0][1]
@@ -60,8 +57,8 @@ def point_series(files: list,
     # iterate over each file extracting the value and time for each
     for file in files:
         # open the file
-        opened_file = open_by_engine(file, engine, xr_kwargs)
-        ts = array_by_engine(opened_file, t_var, h5_group=h5_group)
+        opened_file = _open_by_engine(file, engine, xr_kwargs)
+        ts = _array_by_engine(opened_file, t_var, h5_group=h5_group)
         if ts.ndim == 0:
             times.append(ts)
         else:
@@ -69,7 +66,7 @@ def point_series(files: list,
                 times.append(t)
 
         # extract the appropriate values from the variable
-        vs = slice_array_cell(array_by_engine(opened_file, var, h5_group), dim_order, x_idx, y_idx)
+        vs = _slice_cell(_array_by_engine(opened_file, var, h5_group), dim_order, x_idx, y_idx)
         if vs.ndim == 0:
             if vs == fill_value:
                 vs = np.nan
@@ -121,7 +118,7 @@ def box_series(files: list,
         y_var = 'y'
 
     # get information to slice the array with
-    slicing_info = get_slicing_info(files[0], var, x_var, y_var, t_var, coords, engine, xr_kwargs, h5_group)
+    slicing_info = _slicing_info_2d(files[0], var, x_var, y_var, t_var, coords, engine, xr_kwargs, h5_group)
     dim_order = slicing_info['dim_order']
     xmin_idx = min(slicing_info['indices'][0][0], slicing_info['indices'][1][0])
     xmax_idx = max(slicing_info['indices'][0][0], slicing_info['indices'][1][0])
@@ -135,10 +132,10 @@ def box_series(files: list,
     # iterate over each file extracting the value and time for each
     for file in files:
         # open the file
-        opened_file = open_by_engine(file, engine, xr_kwargs)
+        opened_file = _open_by_engine(file, engine, xr_kwargs)
 
         # get the times
-        ts = array_by_engine(opened_file, t_var, h5_group=h5_group)
+        ts = _array_by_engine(opened_file, t_var, h5_group=h5_group)
         if ts.ndim == 0:
             times.append(ts)
         else:
@@ -146,8 +143,8 @@ def box_series(files: list,
                 times.append(t)
 
         # slice the variable's array, returns array with shape corresponding to dimension order and size
-        vs = slice_array_range(
-            array_by_engine(opened_file, var, h5_group=h5_group), dim_order, xmin_idx, ymin_idx, xmax_idx, ymax_idx)
+        vs = _slice_range(
+            _array_by_engine(opened_file, var, h5_group=h5_group), dim_order, xmin_idx, ymin_idx, xmax_idx, ymax_idx)
         vs[vs == fill_value] = np.nan
         # add the results to the lists of values and times
         if vs.ndim == 1 or vs.ndim == 2:
@@ -215,7 +212,7 @@ def shp_series(files: list,
         y_var = 'y'
 
     # get information to slice the array with
-    slicing_info = get_slicing_info(files[0], var, x_var, y_var, t_var, None, engine, xr_kwargs, h5_group)
+    slicing_info = _slicing_info_2d(files[0], var, x_var, y_var, t_var, None, engine, xr_kwargs, h5_group)
     dim_order = slicing_info['dim_order']
 
     # generate an affine transform used in zonal statistics
@@ -228,8 +225,8 @@ def shp_series(files: list,
     # iterate over each file extracting the value and time for each
     for file in files:
         # open the file
-        opened_file = open_by_engine(file, engine, xr_kwargs)
-        ts = array_by_engine(opened_file, t_var, h5_group=h5_group)
+        opened_file = _open_by_engine(file, engine, xr_kwargs)
+        ts = _array_by_engine(opened_file, t_var, h5_group=h5_group)
         if ts.ndim == 0:
             times.append(ts)
         else:
@@ -237,7 +234,7 @@ def shp_series(files: list,
                 times.append(t)
 
         # slice the variable's array, returns array with shape corresponding to dimension order and size
-        vs = array_by_engine(opened_file, var, h5_group)
+        vs = _array_by_engine(opened_file, var, h5_group)
         vs[vs == fill_value] = np.nan
         # modify the array as necessary
         if vs.ndim == 2:
@@ -262,45 +259,132 @@ def shp_series(files: list,
     return pd.DataFrame(np.transpose(np.asarray([times, values])), columns=['times', 'values'])
 
 
-def gen_ncml(files: list, save_dir: str, time_interval: int) -> None:
-    """
-    Generates a ncml file which aggregates a list of netcdf files across the "time" dimension and the "time" variable.
-    In order for the times displayed in the aggregated NCML dataset to be accurate, they must have a regular time step
-    between measurments.
+# Auxiliary utilities
+def _slicing_info_2d(path: str,
+                     var: str,
+                     x_var: str,
+                     y_var: str,
+                     t_var: str,
+                     coords: tuple or None,
+                     engine: str = None,
+                     xr_kwargs: dict = None,
+                     h5_group: str = None, ) -> dict:
+    if engine is None:
+        engine = _pick_engine(path)
+    # open the file to be read
+    tmp_file = _open_by_engine(path, engine, xr_kwargs)
 
-    Args:
-        files: A list of absolute paths to netcdf files (even if len==1)
-        save_dir: the directory where you would like to save the ncml
-        time_interval: the time spacing between datasets in the units of the netcdf file's time variable
-          (must be constont for ncml aggregation to work properly)
+    # validate choice in variables
+    if not _check_var_in_dataset(tmp_file, var, h5_group):
+        raise ValueError(f'the variable "{var}" was not found in the file {path}')
 
-    Returns:
-        pandas.DataFrame
+    # get a list of the x&y coordinates
+    x_steps = _array_by_engine(tmp_file, x_var)
+    y_steps = _array_by_engine(tmp_file, y_var)
 
-    Examples:
-        .. code-block:: python
+    # if the coordinate data was stored in 2d arrays instead of 1d lists of steps
+    if x_steps.ndim == 2:
+        # select the first row
+        x_steps = x_steps[0, :]
+    if y_steps.ndim == 2:
+        # select the first column
+        y_steps = y_steps[:, 0]
 
-            data = geomatics.timedata.generate_timejoining_ncml('/path/to/netcdf/', '/path/to/save', 4)
-    """
-    ds = nc.Dataset(files[0])
-    units_str = str(ds['time'].__dict__['units'])
-    ds.close()
+    assert x_steps.ndim == 1
+    assert y_steps.ndim == 1
 
-    # create a new ncml file by filling in the template with the right dates and writing to a file
-    with open(os.path.join(save_dir, 'time_joined_series.ncml'), 'w') as ncml:
-        ncml.write(
-            '<netcdf xmlns="http://www.unidata.ucar.edu/namespaces/netcdf/ncml-2.2">\n' +
-            '  <variable name="time" type="int" shape="time">\n' +
-            '    <attribute name="units" value="' + units_str + '"/>\n' +
-            '    <attribute name="_CoordinateAxisType" value="Time" />\n' +
-            '    <values start="0" increment="' + str(time_interval) + '" />\n' +
-            '  </variable>\n' +
-            '  <aggregation dimName="time" type="joinExisting" recheckEvery="5 minutes">\n'
-        )
-        for file in files:
-            ncml.write('    <netcdf location="' + file + '"/>\n')
-        ncml.write(
-            '  </aggregation>\n' +
-            '</netcdf>'
-        )
-    return
+    # if its a netcdf or grib, the dimensions should be included by xarray
+    if engine in ('xarray', 'cfgrib', 'netcdf4', 'rasterio'):
+        dims = list(tmp_file[var].dims)
+        for i, dim in enumerate(dims):
+            dims[i] = str(dim).replace(x_var, 'x').replace(y_var, 'y').replace(t_var, 't')
+        dims = str.join('', dims)
+
+    # guess the dimensions based on the shape of the variable array and length of the x/y steps
+    elif engine == 'hdf5':
+        if h5_group is not None:
+            tmp_file = tmp_file[h5_group]
+        shape = list(_array_by_engine(tmp_file, engine, var).shape)
+        for i, length in enumerate(shape):
+            if length == len(x_steps):
+                shape[i] = 'x'
+            elif length == len(y_steps):
+                shape[i] = 'y'
+            else:
+                shape[i] = 't'
+        dims = str.join('', shape)
+    else:
+        dims = False
+
+    tmp_file.close()
+
+    if coords is None:
+        return dict(dim_order=dims)
+
+    # gather all the indices
+    indices = []
+    x_min = x_steps.min()
+    x_max = x_steps.max()
+    y_min = y_steps.min()
+    y_max = y_steps.max()
+    for coord in coords:
+        # first verify that the location is in the bounds of the coordinate variables
+        x, y = coord
+        x = float(x)
+        y = float(y)
+        if x < x_min or x > x_max:
+            raise ValueError(f'specified x value ({x}) is outside the bounds of the data: [{x_min}, {x_max}]')
+        if y < y_min or y > y_max:
+            raise ValueError(f'specified x value ({y}) is outside the bounds of the data: [{y_min}, {y_max}]')
+        # then calculate the indicies and append to the list of indices
+        indices.append(((np.abs(x_steps - x)).argmin(), (np.abs(y_steps - y)).argmin()), )
+
+    return dict(indices=indices, dim_order=dims)
+
+
+def _slice_cell(array, dim_order, x_idx, y_idx):
+    if dim_order == 'txy':
+        return array[:, x_idx, y_idx]
+    elif dim_order == 'tyx':
+        return array[:, y_idx, x_idx]
+
+    elif dim_order == 'xyt':
+        return array[x_idx, y_idx, :]
+    elif dim_order == 'yxt':
+        return array[y_idx, x_idx, :]
+
+    elif dim_order == 'xty':
+        return array[x_idx, :, y_idx]
+    elif dim_order == 'ytx':
+        return array[y_idx, :, x_idx]
+
+    elif dim_order == 'xy':
+        return array[x_idx, y_idx]
+    elif dim_order == 'yx':
+        return array[y_idx, x_idx]
+    else:
+        raise ValueError('Unrecognized order of dimensions, unable to slice array.')
+
+
+def _slice_range(array, dim_order, xmin_index, ymin_index, xmax_index, ymax_index):
+    if dim_order == 'txy':
+        return array[:, xmin_index:xmax_index, ymin_index:ymax_index]
+    elif dim_order == 'tyx':
+        return array[:, ymin_index:ymax_index, xmin_index:xmax_index]
+
+    elif dim_order == 'xyt':
+        return array[xmin_index:xmax_index, ymin_index:ymax_index, :]
+    elif dim_order == 'yxt':
+        return array[ymin_index:ymax_index, xmin_index:xmax_index, :]
+
+    elif dim_order == 'xty':
+        return array[xmin_index:xmax_index, :, ymin_index:ymax_index]
+    elif dim_order == 'ytx':
+        return array[ymin_index:ymax_index, :, xmin_index:xmax_index]
+
+    elif dim_order == 'xy':
+        return array[xmin_index:xmax_index, ymin_index:ymax_index]
+    elif dim_order == 'yx':
+        return array[ymin_index:ymax_index, xmin_index:xmax_index]
+    else:
+        raise ValueError('Unrecognized order of dimensions, unable to slice array.')
