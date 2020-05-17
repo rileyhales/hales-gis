@@ -3,26 +3,25 @@ import pandas as pd
 
 from ._utils import _open_by_engine, _array_by_engine, _pick_engine, _check_var_in_dataset, _array_to_stat_list
 
-__all__ = ['point_series']
+__all__ = ['point', 'bounding_box', 'polygons', 'full_array_stats']
 
 
-# TIMESERIES FUNCTIONS
-def point_series(files: list,
-                 var: str,
-                 coords: tuple,
-                 dims: tuple = ('lon', 'lat', 'depth'),
-                 t_dim: str = 'time',
-                 fill_value: int = -9999,
-                 engine: str = None,
-                 h5_group: str = None,
-                 xr_kwargs: dict = None, ) -> pd.DataFrame:
+def point(files: list,
+          var: str,
+          coords: tuple,
+          dims: tuple = None,
+          t_dim: str = 'time',
+          fill_value: int = -9999,
+          engine: str = None,
+          h5_group: str = None,
+          xr_kwargs: dict = None, ) -> pd.DataFrame:
     """
     Creates a timeseries of values at the grid cell closest to a specified point.
 
     Args:
         files: A list of absolute paths to netcdf, grib, or hdf5 files (even if len==1)
         var: The name of a variable as it is stored in the file e.g. often 'temp' or 'T' instead of Temperature
-        coords: A tuple of the coordinates for the location of interest in the order ((x1, y1, z1), (x2, y2, z2))
+        coords: A tuple of the coordinates for the location of interest in the order (x, y, z)
         dims: A tuple of the names of the (x, y, z) variables in the data files, the same you specified coords for.
             Defaults to common x, y, z variables names: ('lon', 'lat', 'depth')
             X dimension names are usually 'lon', 'longitude', 'x', or similar
@@ -76,31 +75,33 @@ def point_series(files: list,
     return pd.DataFrame(np.transpose(np.asarray([times, values])), columns=['times', 'values'])
 
 
-def box_series(files: list,
-               var: str,
-               coords: tuple,
-               dims: tuple = ('lon', 'lat', 'depth'),
-               t_dim: str = 'time',
-               fill_value: int = -9999,
-               stat_type: str = 'mean',
-               engine: str = None,
-               h5_group: str = None,
-               xr_kwargs: dict = None, ) -> pd.DataFrame:
+def bounding_box(files: list,
+                 var: str,
+                 min_coords: tuple,
+                 max_coords: tuple,
+                 dims: tuple = None,
+                 t_dim: str = 'time',
+                 stat_type: str = 'mean',
+                 fill_value: int = -9999,
+                 engine: str = None,
+                 h5_group: str = None,
+                 xr_kwargs: dict = None, ) -> pd.DataFrame:
     """
     Creates a timeseries of values based on values within a bounding box specified by your coordinates.
 
     Args:
         files: A list of absolute paths to netcdf or gribs files (even if len==1)
         var: The name of a variable as it is stored in the file e.g. often 'temp' or 'T' instead of Temperature
-        coords: A tuple of the coordinates for the location of interest in the order (x, y, z)
+        min_coords: A tuple of the minimum coordinates for the region of interest in the order (x, y, z)
+        max_coords: A tuple of the maximum coordinates for the region of interest in the order (x, y, z)
         dims: A tuple of the names of the (x, y, z) variables in the data files, the same you specified coords for.
             Defaults to common x, y, z variables names: ('lon', 'lat', 'depth')
             X dimension names are usually 'lon', 'longitude', 'x', or similar
             Y dimension names are usually 'lat', 'latitude', 'y', or similar
             Z dimension names are usually 'depth', 'elevation', 'z', or similar
         t_dim: Name of the time variable if it is used in the files. Default: 'time'
-        fill_value: The value used for filling no_data spaces in the array. Default: -9999
         stat_type: The method to turn the values within a bounding box into a single value: mean, min, max, median
+        fill_value: The value used for filling no_data spaces in the array. Default: -9999
         engine: the python package used to power the file reading
         h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
         xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
@@ -112,7 +113,7 @@ def box_series(files: list,
         engine = _pick_engine(files[0])
 
     # get information to slice the array with
-    dim_order, slices = _slicing_info(files[0], var, (coords,), dims, t_dim, engine, xr_kwargs, h5_group)
+    dim_order, slices = _slicing_info(files[0], var, (min_coords, max_coords), dims, t_dim, engine, xr_kwargs, h5_group)
 
     # make the return item
     times = []
@@ -140,7 +141,148 @@ def box_series(files: list,
     return pd.DataFrame(np.transpose(np.asarray([times, values])), columns=['times', 'values'])
 
 
+# todo geojson, shapefiles, shapely -> geopandas and masking
+def polygons(files: list,
+             var: str,
+             poly: str or dict,
+             dims: tuple = None,
+             t_var: str = 'time',
+             stat_type: str = 'mean',
+             fill_value: int = -9999,
+             engine: str = None,
+             h5_group: str = None,
+             xr_kwargs: dict = None, ) -> pd.DataFrame:
+    """
+    Creates a timeseries of values within the boundaries of your polygon shapefile of the same coordinate system.
+
+    Args:
+        files: A list of absolute paths to netcdf or gribs files (even if len==1)
+        var: The name of a variable as it is stored in the file e.g. often 'temp' or 'T' instead of Temperature
+        poly: # todo what kinds of polygon data can we accept
+        t_var: Name of the time coordinate variable used for time referencing the data. Default: 'time'
+        fill_value: The value used for filling no_data spaces in the array. Default: -9999
+        stat_type: The method to turn the values within the shapefile into a single value: mean, min, max, median
+        engine: the python package used to power the file reading
+        h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
+        xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
+
+    Returns:
+        pandas.DataFrame
+
+    Examples:
+        .. code-block:: python
+
+            data = geomatics.timedata.shp_series([list, of, file, paths], 'AirTemp', '/path/to/shapefile.shp')
+    """
+    if engine == 'rasterio':
+        x_var = 'x'
+        y_var = 'y'
+
+    # get information to slice the array with
+    slicing_info = _slicing_info_2d(files[0], var, x_var, y_var, t_var, None, engine, xr_kwargs, h5_group)
+    dim_order = slicing_info['dim_order']
+
+    # generate an affine transform used in zonal statistics
+    affine = gen_affine(files[0], x_var, y_var, engine=engine, xr_kwargs=xr_kwargs, h5_group=h5_group)
+
+    # make the return item
+    times = []
+    values = []
+
+    # iterate over each file extracting the value and time for each
+    for file in files:
+        # open the file
+        opened_file = _open_by_engine(file, engine, xr_kwargs)
+        ts = _array_by_engine(opened_file, t_var, h5_group=h5_group)
+        if ts.ndim == 0:
+            times.append(ts)
+        else:
+            for t in ts:
+                times.append(t)
+
+        # slice the variable's array, returns array with shape corresponding to dimension order and size
+        vs = _array_by_engine(opened_file, var, h5_group)
+        vs[vs == fill_value] = np.nan
+        # modify the array as necessary
+        if vs.ndim == 2:
+            # if the values are in a 2D array, cushion it with a 3rd dimension so you can iterate
+            vs = np.reshape(vs, [1] + list(np.shape(vs)))
+            dim_order = 't' + dim_order
+        if 't' in dim_order:
+            # roll axis brings the time dimension to the front so we can iterate over it -- may not work as expected
+            vs = np.rollaxis(vs, dim_order.index('t'))
+
+        # do zonal statistics on everything
+        for values_2d in vs:
+            # actually do the gis to get the value within the shapefile
+            stats = rasterstats.zonal_stats(shp_path, values_2d, affine=affine, nodata=np.nan, stats=stat_type)
+            # if your shapefile has many polygons, you get many values back. average them.
+            tmp = [i[stat_type] for i in stats if i[stat_type] is not None]
+            values.append(sum(tmp) / len(tmp))
+
+        opened_file.close()
+
+    # return the data stored in a dataframe
+    return pd.DataFrame(np.transpose(np.asarray([times, values])), columns=['times', 'values'])
+
+
+# todo needs to be tested, maybe fix bugs
+def full_array_stats(files: list,
+                     var: str,
+                     t_dim: str = 'time',
+                     stat_type: str = 'mean',
+                     fill_value: int = -9999,
+                     engine: str = None,
+                     h5_group: str = None,
+                     xr_kwargs: dict = None, ) -> pd.DataFrame:
+    """
+    Creates a timeseries of values based on values within a bounding box specified by your coordinates.
+
+    Args:
+        files: A list of absolute paths to netcdf or gribs files (even if len==1)
+        var: The name of a variable as it is stored in the file e.g. often 'temp' or 'T' instead of Temperature
+        t_dim: Name of the time variable if it is used in the files. Default: 'time'
+        stat_type: The method to turn the values within a bounding box into a single value: mean, min, max, median
+        fill_value: The value used for filling no_data spaces in the array. Default: -9999
+        engine: the python package used to power the file reading
+        h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
+        xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
+
+    Returns:
+        pandas.DataFrame
+    """
+    if engine is None:
+        engine = _pick_engine(files[0])
+
+    # make the return item
+    times = []
+    values = []
+
+    # iterate over each file extracting the value and time for each
+    for file in files:
+        # open the file
+        opened_file = _open_by_engine(file, engine, xr_kwargs)
+        # get the times
+        ts = _array_by_engine(opened_file, t_dim, h5_group=h5_group)
+        if ts.ndim == 0:
+            times.append(ts)
+        else:
+            for t in ts:
+                times.append(t)
+
+        # slice the variable's array, returns array with shape corresponding to dimension order and size
+        vs = _array_by_engine(opened_file, var, h5_group=h5_group)
+        vs[vs == fill_value] = np.nan
+        values += _array_to_stat_list(vs, stat_type)
+        opened_file.close()
+
+    # return the data stored in a dataframe
+    return pd.DataFrame(np.transpose(np.asarray([times, values])), columns=['times', 'values'])
+
+
 # Auxiliary utilities
+# todo guess the dimensions if they are not provided by the user
+# todo detect number of coordinates, extract steps and compute indices for varying range of coordinates.
 def _slicing_info(path: str,
                   var: str,
                   coords: tuple,
