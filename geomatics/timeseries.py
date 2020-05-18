@@ -1,9 +1,12 @@
+import datetime
+
 import numpy as np
 import pandas as pd
 
 from ._utils import _open_by_engine, _array_by_engine, _pick_engine, _check_var_in_dataset, _array_to_stat_list
 
 __all__ = ['point', 'bounding_box', 'polygons', 'full_array_stats']
+__allstats = ['mean', 'max', 'min', 'median']
 
 
 def point(files: list,
@@ -43,8 +46,7 @@ def point(files: list,
     dim_order, slices = _slicing_info(files[0], var, (coords,), dims, t_dim, engine, xr_kwargs, h5_group)
 
     # make the return item
-    times = []
-    values = []
+    results = dict(datetime=[], values=[])
 
     # iterate over each file extracting the value and time for each
     for file in files:
@@ -52,27 +54,27 @@ def point(files: list,
         opened_file = _open_by_engine(file, engine, xr_kwargs)
         ts = _array_by_engine(opened_file, t_dim, h5_group=h5_group)
         if ts.ndim == 0:
-            times.append(ts)
+            results['datetime'].append(ts)
         else:
             for t in ts:
-                times.append(t)
+                results['datetime'].append(t)
 
         # extract the appropriate values from the variable
         vs = _array_by_engine(opened_file, var, h5_group)[slices]
         if vs.ndim == 0:
             if vs == fill_value:
                 vs = np.nan
-            values.append(vs)
+            results['values'].append(vs)
         elif vs.ndim == 1:
             vs[vs == fill_value] = np.nan
             for v in vs:
-                values.append(v)
+                results['values'].append(v)
         else:
             raise ValueError('There are too many dimensions')
         opened_file.close()
 
     # return the data stored in a dataframe
-    return pd.DataFrame(np.transpose(np.asarray([times, values])), columns=['times', 'values'])
+    return pd.DataFrame(results)
 
 
 def bounding_box(files: list,
@@ -81,7 +83,7 @@ def bounding_box(files: list,
                  max_coords: tuple,
                  dims: tuple = None,
                  t_dim: str = 'time',
-                 stat_type: str = 'mean',
+                 stats: str or list = 'mean',
                  fill_value: int = -9999,
                  engine: str = None,
                  h5_group: str = None,
@@ -100,7 +102,7 @@ def bounding_box(files: list,
             Y dimension names are usually 'lat', 'latitude', 'y', or similar
             Z dimension names are usually 'depth', 'elevation', 'z', or similar
         t_dim: Name of the time variable if it is used in the files. Default: 'time'
-        stat_type: The method to turn the values within a bounding box into a single value: mean, min, max, median
+        stats: The method to turn the values within a bounding box into a single value: mean, min, max, median
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
         engine: the python package used to power the file reading
         h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
@@ -112,12 +114,17 @@ def bounding_box(files: list,
     if engine is None:
         engine = _pick_engine(files[0])
 
+    # interpret the choice of statistics provided
+    stats = _gen_stat_list(stats)
+
     # get information to slice the array with
     dim_order, slices = _slicing_info(files[0], var, (min_coords, max_coords), dims, t_dim, engine, xr_kwargs, h5_group)
 
     # make the return item
-    times = []
-    values = []
+    results = dict(datetime=[])
+    # add a list for each stat requested
+    for stat in stats:
+        results[stat] = []
 
     # iterate over each file extracting the value and time for each
     for file in files:
@@ -126,19 +133,20 @@ def bounding_box(files: list,
         # get the times
         ts = _array_by_engine(opened_file, t_dim, h5_group=h5_group)
         if ts.ndim == 0:
-            times.append(ts)
+            results['datetime'].append(ts)
         else:
             for t in ts:
-                times.append(t)
+                results['datetime'].append(t)
 
         # slice the variable's array, returns array with shape corresponding to dimension order and size
         vs = _array_by_engine(opened_file, var, h5_group=h5_group)[slices]
         vs[vs == fill_value] = np.nan
-        values += _array_to_stat_list(vs, stat_type)
+        for stat in stats:
+            results[stat] += _array_to_stat_list(vs, stat)
         opened_file.close()
 
     # return the data stored in a dataframe
-    return pd.DataFrame(np.transpose(np.asarray([times, values])), columns=['times', 'values'])
+    return pd.DataFrame(results)
 
 
 # todo geojson, shapefiles, shapely -> geopandas and masking
@@ -230,7 +238,7 @@ def polygons(files: list,
 def full_array_stats(files: list,
                      var: str,
                      t_dim: str = 'time',
-                     stat_type: str = 'mean',
+                     stats: str or list = 'mean',
                      fill_value: int = -9999,
                      engine: str = None,
                      h5_group: str = None,
@@ -242,7 +250,7 @@ def full_array_stats(files: list,
         files: A list of absolute paths to netcdf or gribs files (even if len==1)
         var: The name of a variable as it is stored in the file e.g. often 'temp' or 'T' instead of Temperature
         t_dim: Name of the time variable if it is used in the files. Default: 'time'
-        stat_type: The method to turn the values within a bounding box into a single value: mean, min, max, median
+        stats: The method to turn the values within a bounding box into a single value: mean, min, max, median
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
         engine: the python package used to power the file reading
         h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
@@ -254,34 +262,42 @@ def full_array_stats(files: list,
     if engine is None:
         engine = _pick_engine(files[0])
 
+    # interpret the choice of statistics provided
+    stats = _gen_stat_list(stats)
+
     # make the return item
-    times = []
-    values = []
+    results = dict(datetime=[])
+    # add a list for each stat requested
+    for stat in stats:
+        results[stat] = []
 
     # iterate over each file extracting the value and time for each
     for file in files:
         # open the file
         opened_file = _open_by_engine(file, engine, xr_kwargs)
-        # get the times
-        ts = _array_by_engine(opened_file, t_dim, h5_group=h5_group)
-        if ts.ndim == 0:
-            times.append(ts)
+        if time_opts.get('strp_pattern', False):
+            results['datetime']
         else:
-            for t in ts:
-                times.append(t)
+            # get the times
+            ts = _array_by_engine(opened_file, t_dim, h5_group=h5_group)
+            if ts.ndim == 0:
+                results['datetime'].append(ts)
+            else:
+                for t in ts:
+                    results['datetime'].append(t)
 
         # slice the variable's array, returns array with shape corresponding to dimension order and size
         vs = _array_by_engine(opened_file, var, h5_group=h5_group)
         vs[vs == fill_value] = np.nan
-        values += _array_to_stat_list(vs, stat_type)
+        for stat in stats:
+            results[stat] += _array_to_stat_list(vs, stat)
         opened_file.close()
 
     # return the data stored in a dataframe
-    return pd.DataFrame(np.transpose(np.asarray([times, values])), columns=['times', 'values'])
+    return pd.DataFrame(results)
 
 
 # Auxiliary utilities
-# todo guess the dimensions if they are not provided by the user
 # todo detect number of coordinates, extract steps and compute indices for varying range of coordinates.
 def _slicing_info(path: str,
                   var: str,
@@ -368,3 +384,28 @@ def _slicing_info(path: str,
         slices_dict = dict(x=slice(x1, x2), y=slice(y1, y2), z=slice(z1, z2), t=slice(None))
 
     return dim_order, tuple([slices_dict[d] for d in dim_order])
+
+
+def _gen_stat_list(stats: str or list):
+    if isinstance(stats, str):
+        if stats == 'all':
+            stats == __allstats
+        else:
+            stats = stats.lower().replace(' ', '').split(',')
+    if any(stat not in __allstats for stat in stats):
+        raise ValueError(f'Unrecognized stat requested. Choose from: {__allstats}')
+
+
+# todo work on this- can't return lists because they're mutable. change the results dictionary item?
+def _handle_time_steps(opened_file, file_path, t_dim, strp_string, h5_group):
+    if strp_string:
+        return datetime.datetime.strptime(file_path, strp_string)
+    else:  # use the time variable
+        ts = _array_by_engine(opened_file, t_dim, h5_group=h5_group)
+        if ts.ndim == 0:
+            return ts
+        else:
+            dates = []
+            for t in ts:
+                dates.append(t)
+            return dates

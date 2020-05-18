@@ -31,3 +31,9 @@ setup(
     ],
     install_requires=install_requires
 )
+
+# todo increment the version to 0.9 in setup and docs
+# todo mod docs about kinds of stats you can get out including the 'all' option
+# todo make the timeseries function generally applicable to the 1d and 2d data
+# todo mod docs updated time from filename string
+# todo guess the dimensions if they are not provided by the user?????

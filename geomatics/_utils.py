@@ -73,25 +73,18 @@ def _array_to_stat_list(array: np.array, statistic: str) -> list:
     # add the results to the lists of values and times
     if array.ndim == 1 or array.ndim == 2:
         if statistic == 'mean':
-            list_of_stats.append(np.mean(array))
+            list_of_stats.append(np.nanmean(array))
         elif statistic == 'median':
-            list_of_stats.append(np.median(array))
+            list_of_stats.append(np.nanmedian(array))
         elif statistic == 'max':
-            list_of_stats.append(np.max(array))
+            list_of_stats.append(np.nanmax(array))
         elif statistic == 'min':
-            list_of_stats.append(np.min(array))
+            list_of_stats.append(np.nanmin(array))
         else:
             raise ValueError(f'Unrecognized statistic, {statistic}. Use stat_type= mean, min or max')
-    else:
+    elif array.ndim == 3:
         for v in array:
-            if statistic == 'mean':
-                list_of_stats.append(np.mean(v))
-            elif statistic == 'median':
-                list_of_stats.append(np.median(v))
-            elif statistic == 'max':
-                list_of_stats.append(np.max(v))
-            elif statistic == 'min':
-                list_of_stats.append(np.min(v))
-            else:
-                raise ValueError(f'Unrecognized statistic, {statistic}. Use stat_type= mean, min or max')
+            list_of_stats += _array_to_stat_list(v, statistic)
+    else:
+        raise ValueError('Too many dimensions in the array. You probably did not mean to do stats like this')
     return list_of_stats
