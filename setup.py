@@ -1,6 +1,6 @@
 from setuptools import setup
 
-version = '0.8'
+version = '0.9'
 
 with open('README.md', 'r') as readme:
     long_description = readme.read()
@@ -32,8 +32,9 @@ setup(
     install_requires=install_requires
 )
 
-# todo increment the version to 0.9 in setup and docs
-# todo mod docs about kinds of stats you can get out including the 'all' option
-# todo make the timeseries function generally applicable to the 1d and 2d data
-# todo mod docs updated time from filename string
+# todo mod docs -> new stats you can get out including the 'all' option
+# todo mod docs -> time from filename string
+# todo mod docs -> support for geotiff if you use the dims, (x,y,band) dimensions
+# todo finish the shapefile/geojson series option
 # todo guess the dimensions if they are not provided by the user?????
+# todo option to also output filepath which the values came from????? -> open as new_feature issue on github

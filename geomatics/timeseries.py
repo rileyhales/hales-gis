@@ -1,5 +1,6 @@
 import datetime
 
+import geopandas
 import numpy as np
 import pandas as pd
 
@@ -14,6 +15,7 @@ def point(files: list,
           coords: tuple,
           dims: tuple = None,
           t_dim: str = 'time',
+          strp: str = False,
           fill_value: int = -9999,
           engine: str = None,
           h5_group: str = None,
@@ -43,7 +45,7 @@ def point(files: list,
         engine = _pick_engine(files[0])
 
     # get information to slice the array with
-    dim_order, slices = _slicing_info(files[0], var, (coords,), dims, t_dim, engine, xr_kwargs, h5_group)
+    dim_order, slices = _slicing_info(files[0], var, coords, None, dims, t_dim, engine, xr_kwargs, h5_group)
 
     # make the return item
     results = dict(datetime=[], values=[])
@@ -52,12 +54,7 @@ def point(files: list,
     for file in files:
         # open the file
         opened_file = _open_by_engine(file, engine, xr_kwargs)
-        ts = _array_by_engine(opened_file, t_dim, h5_group=h5_group)
-        if ts.ndim == 0:
-            results['datetime'].append(ts)
-        else:
-            for t in ts:
-                results['datetime'].append(t)
+        results['datetime'] += list(_handle_time_steps(opened_file, file, t_dim, strp, h5_group))
 
         # extract the appropriate values from the variable
         vs = _array_by_engine(opened_file, var, h5_group)[slices]
@@ -118,7 +115,7 @@ def bounding_box(files: list,
     stats = _gen_stat_list(stats)
 
     # get information to slice the array with
-    dim_order, slices = _slicing_info(files[0], var, (min_coords, max_coords), dims, t_dim, engine, xr_kwargs, h5_group)
+    dim_order, slices = _slicing_info(files[0], var, min_coords, max_coords, dims, t_dim, engine, xr_kwargs, h5_group)
 
     # make the return item
     results = dict(datetime=[])
@@ -182,16 +179,19 @@ def polygons(files: list,
 
             data = geomatics.timedata.shp_series([list, of, file, paths], 'AirTemp', '/path/to/shapefile.shp')
     """
+    if engine is None:
+        engine = _pick_engine(files[0])
     if engine == 'rasterio':
-        x_var = 'x'
-        y_var = 'y'
+        dims = ('x', 'y', 'band')
+
+    vector_data = geopandas.
 
     # get information to slice the array with
     slicing_info = _slicing_info_2d(files[0], var, x_var, y_var, t_var, None, engine, xr_kwargs, h5_group)
     dim_order = slicing_info['dim_order']
 
     # generate an affine transform used in zonal statistics
-    affine = gen_affine(files[0], x_var, y_var, engine=engine, xr_kwargs=xr_kwargs, h5_group=h5_group)
+    affine = gen_affine(files[0], dims[0], dims[1], engine=engine, xr_kwargs=xr_kwargs, h5_group=h5_group)
 
     # make the return item
     times = []
@@ -216,14 +216,14 @@ def polygons(files: list,
             # if the values are in a 2D array, cushion it with a 3rd dimension so you can iterate
             vs = np.reshape(vs, [1] + list(np.shape(vs)))
             dim_order = 't' + dim_order
-        if 't' in dim_order:
+        if dims[2] in dim_order:
             # roll axis brings the time dimension to the front so we can iterate over it -- may not work as expected
             vs = np.rollaxis(vs, dim_order.index('t'))
 
         # do zonal statistics on everything
-        for values_2d in vs:
+        for slice_2d in vs:
             # actually do the gis to get the value within the shapefile
-            stats = rasterstats.zonal_stats(shp_path, values_2d, affine=affine, nodata=np.nan, stats=stat_type)
+            stats = rasterstats.zonal_stats(shp_path, slice_2d, affine=affine, nodata=np.nan, stats=stat_type)
             # if your shapefile has many polygons, you get many values back. average them.
             tmp = [i[stat_type] for i in stats if i[stat_type] is not None]
             values.append(sum(tmp) / len(tmp))
@@ -234,7 +234,6 @@ def polygons(files: list,
     return pd.DataFrame(np.transpose(np.asarray([times, values])), columns=['times', 'values'])
 
 
-# todo needs to be tested, maybe fix bugs
 def full_array_stats(files: list,
                      var: str,
                      t_dim: str = 'time',
@@ -298,10 +297,10 @@ def full_array_stats(files: list,
 
 
 # Auxiliary utilities
-# todo detect number of coordinates, extract steps and compute indices for varying range of coordinates.
 def _slicing_info(path: str,
                   var: str,
-                  coords: tuple,
+                  min_coords: tuple or None,
+                  max_coords: tuple or None,
                   dims: tuple,
                   t_dim: str,
                   engine: str = None,
@@ -309,24 +308,14 @@ def _slicing_info(path: str,
                   h5_group: str = None, ) -> tuple:
     if engine is None:
         engine = _pick_engine(path)
+    if max_coords is None:
+        max_coords = (False, False, False,)
     # open the file to be read
     tmp_file = _open_by_engine(path, engine, xr_kwargs)
 
     # validate choice in variables
     if not _check_var_in_dataset(tmp_file, var, h5_group):
         raise ValueError(f'the variable "{var}" was not found in the file {path}')
-
-    # get a list of the x&y coordinates
-    x_steps = _array_by_engine(tmp_file, dims[0])
-    if x_steps.ndim == 2:
-        x_steps = x_steps[0, :]
-    y_steps = _array_by_engine(tmp_file, dims[1])
-    if y_steps.ndim == 2:
-        y_steps = y_steps[:, 0]
-    z_steps = _array_by_engine(tmp_file, dims[2])
-
-    assert x_steps.ndim == 1
-    assert y_steps.ndim == 1
 
     # if its a netcdf or grib, the dimensions should be included by xarray
     if engine in ('xarray', 'cfgrib', 'netcdf4', 'rasterio'):
@@ -339,64 +328,53 @@ def _slicing_info(path: str,
         raise ValueError(f'Unable to determine dims for engine: {engine}')
 
     for i, d in enumerate(dim_order):
-        dim_order[i] = str(d).replace(dims[0], 'x').replace(dims[1], 'y').replace(dims[2], 'z').replace(t_dim, 't')
-    dim_order = str.join('', dim_order)
+        tmp = str(d)
+        tmp = tmp.replace(t_dim, 't_dim')
+        for j, dimname in enumerate(dims):
+            tmp = tmp.replace(dimname, f'dim{j}')
+        dim_order[i] = tmp
+    dim_order = str.join(',', dim_order)
 
     tmp_file.close()
 
-    if coords is None:
-        return dim_order, coords
+    if min_coords is None and max_coords is None:
+        return dim_order, None
 
     # gather all the indices
-    indices = []
-    x_min = x_steps.min()
-    x_max = x_steps.max()
-    y_min = y_steps.min()
-    y_max = y_steps.max()
-    z_min = z_steps.min()
-    z_max = z_steps.max()
-    for coord in coords:
-        # first verify that the location is in the bounds of the coordinate variables
-        x, y, z = coord
-        x = float(x)
-        y = float(y)
-        z = float(z)
-        if x < x_min or x > x_max:
-            raise ValueError(f'specified x value ({x}) is outside the min/max range: [{x_min}, {x_max}]')
-        if y < y_min or y > y_max:
-            raise ValueError(f'specified y value ({y}) is outside the min/max range: [{y_min}, {y_max}]')
-        if z < z_min or z > z_max:
-            raise ValueError(f'specified z value ({z}) is outside the min/max range: [{z_min}, {z_max}]')
-        # then calculate the indicies and append to the list of indices
-        indices.append((
-            (np.abs(x_steps - x)).argmin(), (np.abs(y_steps - y)).argmin(), (np.abs(z_steps - z)).argmin(),))
+    slices_dict = dict(t_dim=slice(None))
 
-    # make a tuple of indices and slicing objects which we use to get the values from the arrays later
-    if len(indices) == 1:  # then only one coord is given and we want to slice that
-        slices_dict = dict(x=indices[0][0], y=indices[0][1], z=indices[0][2], t=slice(None))
-    else:  # there were 2 coordinates and we want to slice over their bounding range
-        x1 = min(indices[0][0], indices[1][0])
-        x2 = max(indices[0][0], indices[1][0])
-        y1 = min(indices[0][1], indices[1][1])
-        y2 = max(indices[0][1], indices[1][1])
-        z1 = min(indices[0][2], indices[1][2])
-        z2 = max(indices[0][2], indices[1][2])
-        slices_dict = dict(x=slice(x1, x2), y=slice(y1, y2), z=slice(z1, z2), t=slice(None))
+    # SLICING THE --X-- COORDINATE
+    steps = _array_by_engine(tmp_file, dims[0])
+    if steps.ndim == 2:
+        steps = steps[0, :]
+    slices_dict['dim0'] = _find_nearest_slice_index(steps, min_coords[0], max_coords[0])
 
-    return dim_order, tuple([slices_dict[d] for d in dim_order])
+    # SLICING THE --Y-- COORDINATE
+    if len(min_coords) >= 2:
+        steps = _array_by_engine(tmp_file, dims[1])
+        if steps.ndim == 2:
+            steps = steps[:, 0]
+        slices_dict['dim1'] = _find_nearest_slice_index(steps, min_coords[1], max_coords[1])
+
+    # SLICING THE --Z-- AND OTHER ANY OTHER COORDINATES
+    if len(min_coords) >= 3:
+        for i in range(2, len(min_coords)):
+            steps = _array_by_engine(tmp_file, dims[i])
+            slices_dict[f'dim{i}'] = _find_nearest_slice_index(steps, min_coords[i], max_coords[i])
+
+    return dim_order, tuple([slices_dict[d] for d in dim_order.split(',')])
 
 
 def _gen_stat_list(stats: str or list):
     if isinstance(stats, str):
         if stats == 'all':
-            stats == __allstats
+            stats = __allstats
         else:
             stats = stats.lower().replace(' ', '').split(',')
     if any(stat not in __allstats for stat in stats):
         raise ValueError(f'Unrecognized stat requested. Choose from: {__allstats}')
 
 
-# todo work on this- can't return lists because they're mutable. change the results dictionary item?
 def _handle_time_steps(opened_file, file_path, t_dim, strp_string, h5_group):
     if strp_string:
         return datetime.datetime.strptime(file_path, strp_string)
@@ -409,3 +387,29 @@ def _handle_time_steps(opened_file, file_path, t_dim, strp_string, h5_group):
             for t in ts:
                 dates.append(t)
             return dates
+
+
+def _find_nearest_slice_index(list_of_values: np.array, val1, val2=False):
+    try:
+        assert list_of_values.ndim == 1
+    except AssertionError as e:
+        raise e
+
+    min_val = list_of_values.min()
+    max_val = list_of_values.max()
+    if not max_val >= val1 >= min_val:
+        raise ValueError(f'specified coordinate value ({val1}) is outside the min/max range: [{min_val}, {max_val}]')
+    index1 = (np.abs(list_of_values - val1)).argmin()
+
+    if val2 is False:
+        return index1
+
+    if not max_val >= val2 >= min_val:
+        raise ValueError(f'specified coordinate value ({val2}) is outside the min/max range: [{min_val}, {max_val}]')
+    index2 = (np.abs(list_of_values - val2)).argmin()
+    if index1 == index2:
+        return index1
+    elif index1 < index2:  # we'll put this check in there just in case they got the coordinates wrong
+        return slice(index1, index2)
+    else:
+        return slice(index2, index1)
