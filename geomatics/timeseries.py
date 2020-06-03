@@ -1,10 +1,11 @@
 import datetime
 
-import geopandas
 import numpy as np
 import pandas as pd
+import rasterstats
 
 from ._utils import _open_by_engine, _array_by_engine, _pick_engine, _check_var_in_dataset, _array_to_stat_list
+from .data import gen_affine
 
 __all__ = ['point', 'bounding_box', 'polygons', 'full_array_stats']
 __allstats = ['mean', 'max', 'min', 'median']
@@ -33,13 +34,14 @@ def point(files: list,
             Y dimension names are usually 'lat', 'latitude', 'y', or similar
             Z dimension names are usually 'depth', 'elevation', 'z', or similar
         t_dim: Name of the time variable if it is used in the files. Default: 'time'
+        strp: A string compatible with datetime.strptime for extracting datetime pattern in file names
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
         engine: the python package used to power the file reading. Defaults to best for the type of input data
         h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
         xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
 
     Returns:
-        pandas.DataFrame
+        pandas.DataFrame with datetime index and a single column labeled values
     """
     if engine is None:
         engine = _pick_engine(files[0])
@@ -80,6 +82,7 @@ def bounding_box(files: list,
                  max_coords: tuple,
                  dims: tuple = None,
                  t_dim: str = 'time',
+                 strp: str = False,
                  stats: str or list = 'mean',
                  fill_value: int = -9999,
                  engine: str = None,
@@ -99,7 +102,8 @@ def bounding_box(files: list,
             Y dimension names are usually 'lat', 'latitude', 'y', or similar
             Z dimension names are usually 'depth', 'elevation', 'z', or similar
         t_dim: Name of the time variable if it is used in the files. Default: 'time'
-        stats: The method to turn the values within a bounding box into a single value: mean, min, max, median
+        strp: A string compatible with datetime.strptime for extracting datetime pattern in file names
+        stats: How to reduce values within the bounding box into a single value: mean, min, max, median, or all
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
         engine: the python package used to power the file reading
         h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
@@ -128,12 +132,7 @@ def bounding_box(files: list,
         # open the file
         opened_file = _open_by_engine(file, engine, xr_kwargs)
         # get the times
-        ts = _array_by_engine(opened_file, t_dim, h5_group=h5_group)
-        if ts.ndim == 0:
-            results['datetime'].append(ts)
-        else:
-            for t in ts:
-                results['datetime'].append(t)
+        results['datetime'] += list(_handle_time_steps(opened_file, file, t_dim, strp, h5_group))
 
         # slice the variable's array, returns array with shape corresponding to dimension order and size
         vs = _array_by_engine(opened_file, var, h5_group=h5_group)[slices]
@@ -146,12 +145,12 @@ def bounding_box(files: list,
     return pd.DataFrame(results)
 
 
-# todo geojson, shapefiles, shapely -> geopandas and masking
 def polygons(files: list,
              var: str,
              poly: str or dict,
              dims: tuple = None,
-             t_var: str = 'time',
+             t_dim: str = 'time',
+             strp: str = False,
              stat_type: str = 'mean',
              fill_value: int = -9999,
              engine: str = None,
@@ -163,10 +162,16 @@ def polygons(files: list,
     Args:
         files: A list of absolute paths to netcdf or gribs files (even if len==1)
         var: The name of a variable as it is stored in the file e.g. often 'temp' or 'T' instead of Temperature
-        poly: # todo what kinds of polygon data can we accept
-        t_var: Name of the time coordinate variable used for time referencing the data. Default: 'time'
+        poly: the path to a shapefile or geojson in the same coordinate system and projection as the raster data
+        dims: A tuple of the names of the (x, y, z) variables in the data files, the same you specified coords for.
+            Defaults to common x, y, z variables names: ('lon', 'lat', 'depth')
+            X dimension names are usually 'lon', 'longitude', 'x', or similar
+            Y dimension names are usually 'lat', 'latitude', 'y', or similar
+            Z dimension names are usually 'depth', 'elevation', 'z', or similar
+        t_dim: Name of the time coordinate variable used for time referencing the data. Default: 'time'
+        strp: A string compatible with datetime.strptime for extracting datetime pattern in file names
         fill_value: The value used for filling no_data spaces in the array. Default: -9999
-        stat_type: The method to turn the values within the shapefile into a single value: mean, min, max, median
+        stat_type: How to turn the values within the shapefile into a single value: mean, min, max, median
         engine: the python package used to power the file reading
         h5_group: if all variables in the hdf5 file are in the same group, you can specify the name of the group here
         xr_kwargs: A dictionary of kwargs that you might need when opening complex grib files with xarray
@@ -184,29 +189,20 @@ def polygons(files: list,
     if engine == 'rasterio':
         dims = ('x', 'y', 'band')
 
-    vector_data = geopandas.
-
     # get information to slice the array with
-    slicing_info = _slicing_info_2d(files[0], var, x_var, y_var, t_var, None, engine, xr_kwargs, h5_group)
-    dim_order = slicing_info['dim_order']
+    dim_order, _ = _slicing_info(files[0], var, None, None, dims, t_dim, engine, xr_kwargs, h5_group)
 
     # generate an affine transform used in zonal statistics
     affine = gen_affine(files[0], dims[0], dims[1], engine=engine, xr_kwargs=xr_kwargs, h5_group=h5_group)
 
     # make the return item
-    times = []
-    values = []
+    results = dict(datetime=[], values=[])
 
     # iterate over each file extracting the value and time for each
     for file in files:
         # open the file
         opened_file = _open_by_engine(file, engine, xr_kwargs)
-        ts = _array_by_engine(opened_file, t_var, h5_group=h5_group)
-        if ts.ndim == 0:
-            times.append(ts)
-        else:
-            for t in ts:
-                times.append(t)
+        results['datetime'] += list(_handle_time_steps(opened_file, file, t_dim, strp, h5_group))
 
         # slice the variable's array, returns array with shape corresponding to dimension order and size
         vs = _array_by_engine(opened_file, var, h5_group)
@@ -223,12 +219,13 @@ def polygons(files: list,
         # do zonal statistics on everything
         for slice_2d in vs:
             # actually do the gis to get the value within the shapefile
-            stats = rasterstats.zonal_stats(shp_path, slice_2d, affine=affine, nodata=np.nan, stats=stat_type)
+            stats = rasterstats.zonal_stats(poly, slice_2d, affine=affine, nodata=np.nan, stats=stat_type)
             # if your shapefile has many polygons, you get many values back. average them.
             tmp = [i[stat_type] for i in stats if i[stat_type] is not None]
-            values.append(sum(tmp) / len(tmp))
-
+            results['values'] += list(_array_to_stat_list(vs, stat)
         opened_file.close()
+        import rasterio.mask
+        rasterio.mask
 
     # return the data stored in a dataframe
     return pd.DataFrame(np.transpose(np.asarray([times, values])), columns=['times', 'values'])

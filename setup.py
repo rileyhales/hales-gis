@@ -34,7 +34,7 @@ setup(
 
 # todo mod docs -> new stats you can get out including the 'all' option
 # todo mod docs -> time from filename string
-# todo mod docs -> support for geotiff if you use the dims, (x,y,band) dimensions
+# todo mod docs -> support for geotiff if you use the dims x,y,band
 # todo finish the shapefile/geojson series option
 # todo guess the dimensions if they are not provided by the user?????
 # todo option to also output filepath which the values came from????? -> open as new_feature issue on github
