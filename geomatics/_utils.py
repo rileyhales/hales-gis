@@ -80,6 +80,12 @@ def _array_to_stat_list(array: np.array, statistic: str) -> list:
             list_of_stats.append(np.nanmax(array))
         elif statistic == 'min':
             list_of_stats.append(np.nanmin(array))
+        elif statistic == 'sum':
+            list_of_stats.append(np.nansum(array))
+        elif statistic == 'std':
+            list_of_stats.append(np.nanstd(array))
+        elif '%' in statistic:
+            list_of_stats.append(np.nanpercentile(array, int(statistic.replace('%', ''))))
         else:
             raise ValueError(f'Unrecognized statistic, {statistic}. Use stat_type= mean, min or max')
     elif array.ndim == 3:
