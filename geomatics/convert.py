@@ -9,10 +9,9 @@ from rasterio.enums import Resampling
 from ._utils import _open_by_engine, _array_by_engine
 from .data import gen_affine
 
-__all__ = ['geojson_to_shapefile', 'to_geotiffs', 'to_multiband_geotiff', 'upsample_geotiff']
+__all__ = ['geojson_to_shapefile', 'to_gtiffs', 'to_mb_gtiff', 'upsample_gtiff']
 
 
-# todo use geopandas to do this
 def geojson_to_shapefile(geojson: dict, savepath: str) -> None:
     """
     Turns a valid dict, json, or geojson containing polygon data in a geographic coordinate system into a shapefile
@@ -60,19 +59,18 @@ def geojson_to_shapefile(geojson: dict, savepath: str) -> None:
     return
 
 
-# todo write multiband geotiff if the array is 3dim
-def to_geotiffs(files: list,
-                var: str,
-                engine: str = None,
-                aff: affine.Affine = None,
-                crs: str = 'EPSG:4326',
-                x_var: str = 'lon',
-                y_var: str = 'lat',
-                xr_kwargs: dict = None,
-                h5_group: str = None,
-                fill_value: int = -9999,
-                save_dir: str = False,
-                delete_sources: bool = False) -> list:
+def to_gtiffs(files: list,
+              var: str,
+              engine: str = None,
+              aff: affine.Affine = None,
+              crs: str = 'EPSG:4326',
+              x_var: str = 'lon',
+              y_var: str = 'lat',
+              xr_kwargs: dict = None,
+              h5_group: str = None,
+              fill_value: int = -9999,
+              save_dir: str = False,
+              delete_sources: bool = False) -> list:
     """
     Converts the array of data for a certain variable in a grib file to a geotiff.
 
@@ -140,19 +138,19 @@ def to_geotiffs(files: list,
     return output_files
 
 
-def to_multiband_geotiff(files: list,
-                         var: str,
-                         engine: str = None,
-                         aff: affine.Affine = None,
-                         crs: str = 'EPSG:4326',
-                         x_var: str = 'lon',
-                         y_var: str = 'lat',
-                         xr_kwargs: dict = None,
-                         h5_group: str = None,
-                         fill_value: int = -9999,
-                         save_dir: str = False,
-                         save_name: str = False,
-                         delete_sources: bool = False) -> list:
+def to_mb_gtiff(files: list,
+                var: str,
+                engine: str = None,
+                aff: affine.Affine = None,
+                crs: str = 'EPSG:4326',
+                x_var: str = 'lon',
+                y_var: str = 'lat',
+                xr_kwargs: dict = None,
+                h5_group: str = None,
+                fill_value: int = -9999,
+                save_dir: str = False,
+                save_name: str = False,
+                delete_sources: bool = False) -> list:
     """
     Converts the array of data for a certain variable in a grib file to a geotiff.
 
@@ -232,7 +230,7 @@ def to_multiband_geotiff(files: list,
     return save_path
 
 
-def upsample_geotiff(files: list, scale: float) -> list:
+def upsample_gtiff(files: list, scale: float) -> list:
     """
     Performs array math to artificially increase the resolution of a geotiff. No interpolation of values. A scale
     factor of X means that the length of a horizontal and vertical grid cell decreases by X. Be careful, increasing the

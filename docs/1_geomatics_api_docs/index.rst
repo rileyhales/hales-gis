@@ -8,5 +8,4 @@ API Documentation
 	convert
 	data
 	inspect
-	series_1d
-	series_2d
+	timeseries

@@ -53,12 +53,9 @@ def _pick_engine(path: str) -> str:
 
 
 def _check_var_in_dataset(open_file, variable, h5_group):
-    # if isinstance(variable, str):
-    #     variable = [variable, ]
     if isinstance(open_file, xr.Dataset):  # xarray
         return bool(variable in open_file.variables)
     elif isinstance(open_file, h5py.Dataset):  # h5py
-        # not using open_file[:] because [:] can't slice string data but ... catches it all
         if h5_group is not None:
             open_file = open_file[h5_group]
         return bool(variable in open_file.keys())

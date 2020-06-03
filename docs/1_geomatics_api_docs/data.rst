@@ -14,7 +14,7 @@ Georeferencing
 ~~~~~~~~~~~~~~
 
 .. automodule:: geomatics.data
-	:members: gen_affine, gen_ncml
+	:members: gen_affine
 	:noindex:
 
 Timeseries Animation

@@ -45,7 +45,9 @@ autodoc_mock_imports = [
     'pyproj',
     'xarray',
     'h5py',
-    'affine'
+    'affine',
+    'geopandas',
+    'PIL',
 ]
 
 # Add any paths that contain templates here, relative to this directory.
